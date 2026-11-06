@@ -20,6 +20,22 @@ All notable changes. Versions follow `[workspace.package] version` in `Cargo.tom
   guards, demo and coverage scripts, CI and a tag-triggered release workflow (source tarball, SHA256SUMS, provenance
   attestation).
 
+### Changed after an independent review
+
+- The demo fails when cargo fails or when an attack row is missing (`scripts/attack-table.sh`, tested by `scripts/test-demo.sh`);
+  it used to drop the first row of every attack test. The recorded run counts the real number of hostile transactions and
+  README, SECURITY and the architecture tests agree with it.
+- Errors in the attack evidence name the program that returned them (a token program error was printed with a vesting error name).
+- `revoke` reads the beneficiary's token account only when the beneficiary is paid, and clears an open beneficiary proposal.
+- The program crate has the `cdylib` crate type; `docs/sbf-checklist.md` lists what is prepared for an SBF build, what is checked
+  statically (no allocation in handlers, no large stack array, value sizes) and what remains unverified.
+- `scripts/rs.sh --net` accepts exact commands only; the secret scanner knows Solana keypair arrays, base58 key-length values and
+  keypair file names; `.gitignore` ignores keypair files in every directory.
+- `scripts/check-lock.sh`, `scripts/test-lock.sh` and `scripts/verify-lock.sh` check `Cargo.lock`; `docs/lockfile.md` records how it
+  was made, including the hand-edited `wasm-bindgen` entries, and the CI `lockfile` job runs the verification.
+- Documentation brought in line with the code: what is checked on every load, the stack-frame sentence, the same-transaction
+  revival test, the findings table of the audit checklist.
+
 ### Known limitations
 
 - Not audited, not deployed. The vesting program is tested as a native build; no SBF build exists in this repository's
