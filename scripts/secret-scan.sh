@@ -25,11 +25,14 @@ sk-style-key	sk-[A-Za-z0-9_-]{32,}
 jwt	eyJ[A-Za-z0-9_-]{15,}\.eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}
 url-with-password	[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]@]{6,}@[^/[:space:]]+
 quoted-secret-assignment	(api[_-]?key|secret|token|passwd|password|private[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9+/_=-]{24,}["'"'"']
-raw-private-hex	(^|[^0-9A-Fa-f])0x[0-9a-fA-F]{64}([^0-9A-Fa-f]|$)'
+raw-private-hex	(^|[^0-9A-Fa-f])0x[0-9a-fA-F]{64}([^0-9A-Fa-f]|$)
+solana-keypair-array	\[[[:space:]]*[0-9]{1,3}([[:space:]]*,[[:space:]]*[0-9]{1,3}){63}[[:space:]]*\]
+base58-64-byte-value	["'"'"'][1-9A-HJ-NP-Za-km-z]{86,88}["'"'"']'
 
 # file names that must never be committed (matched against the basename)
 bad_name() {
   case "$1" in
+    id.json|keypair.json|keypair-*.json|*-keypair.json) return 0 ;;
     .env|.env.*|*.env) case "$1" in .env.example|.env.sample|.env.template|*.env.example) return 1 ;; esac; return 0 ;;
     *.pem|*.key|*.p12|*.pfx|*.jks|*.keystore|id_rsa|id_rsa.*|id_ed25519|id_ed25519.*|id_ecdsa|id_ecdsa.*|.netrc|credentials.json|service-account*.json|*.tfstate|*.tfstate.*|secrets.json|secrets.yml|secrets.yaml|secrets.toml) return 0 ;;
   esac

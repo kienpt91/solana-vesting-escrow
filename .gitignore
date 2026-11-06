@@ -29,6 +29,8 @@ service-account*.json
 *.tfstate.*
 
 # keypair files written by Solana tooling: test keypairs are generated in memory at runtime and never stored
-/keypair*.json
-/*-keypair.json
-/id.json
+# (not anchored to the root: a keypair in any subdirectory is ignored too)
+**/keypair.json
+**/keypair-*.json
+**/*-keypair.json
+**/id.json
