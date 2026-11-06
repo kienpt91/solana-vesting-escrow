@@ -12,8 +12,10 @@
 //! at the end time.
 #![forbid(unsafe_code)]
 
+mod accounting;
 mod error;
 mod schedule;
 
+pub use accounting::Revocation;
 pub use error::{AccountingError, ScheduleError};
 pub use schedule::{Schedule, MAX_DURATION_SECS};
