@@ -70,7 +70,7 @@ The mint's freeze authority and mint authority are outside the model: a mint tha
 | A forged program-owned copy at a non-canonical address is refused on use; so is a stored bump that is not the canonical one | `wrong_pda_forged_schedule_at_a_non_canonical_address`, `wrong_bump_stored_in_the_schedule_does_not_match_the_canonical_bump` |
 | An existing schedule is never overwritten, and a program-owned zeroed account is neither initialised over nor usable | `reinitialisation_of_a_live_schedule`, `reinitialisation_of_a_program_owned_account_with_zeroed_data` |
 | Wrong-length data is refused | `truncated_and_padded_schedule_data_is_refused`, `programs/vesting_escrow/tests/layout.rs` |
-| A closed schedule cannot be used, and sending lamports to its address does not revive it | `a_closed_schedule_cannot_be_used_or_revived` |
+| A closed schedule cannot be used, and sending lamports to its address does not revive it, in a later transaction or in the same one | `a_closed_schedule_cannot_be_used_or_revived`, `a_closed_schedule_cannot_be_revived_in_the_same_transaction` |
 | Lamports sent to the schedule address before creation do not block creation (the account is topped up, allocated and assigned) | `lamports_sent_to_the_schedule_address_first_do_not_block_creation`, `an_oversized_donation_to_the_schedule_address_is_kept_not_refunded` (happy_paths.rs) |
 | The schedule account is rent exempt when created | `initialize_funds_the_vault_and_records_the_schedule` (happy_paths.rs) |
 | A donation of tokens to the vault does not block closing; the surplus goes to the authority | `a_donation_to_the_vault_is_swept_to_the_authority_on_close` (happy_paths.rs) |
@@ -104,7 +104,9 @@ The mint's freeze authority and mint authority are outside the model: a mint tha
   There is nothing to test; the claim is the id check (`fake_token_program_on_every_instruction`).
 * **Freeze authority of the mint.** A mint with a freeze authority can freeze the vault or a payee account. Pay-outs then
   fail with `TokenAccountFrozen`; nothing is lost, it is stuck until the freeze authority thaws it. A revocation pays both
-  sides in one instruction, so a frozen beneficiary account blocks revocation until it is thawed (ADR 0004).
+  sides in one instruction, so a frozen beneficiary account blocks a revocation that pays the beneficiary until it is thawed; a
+  revocation that owes the beneficiary nothing (before the cliff) does not read that account and goes through
+  (`a_revocation_that_pays_the_beneficiary_nothing_does_not_need_a_usable_beneficiary_account`, ADR 0004).
 * **Program upgrade authority.** Whoever holds the upgrade authority of the deployed program can replace it. The program
   has no say in that; see `docs/audit-checklist.md`, "Upgrade authority". Deploy with the authority revoked or held by a
   multisig, and say so to the users.

@@ -521,6 +521,32 @@ async fn a_closed_schedule_cannot_be_used_or_revived() {
 }
 
 #[tokio::test]
+async fn a_closed_schedule_cannot_be_revived_in_the_same_transaction() {
+    let mut s = Scenario::new(Setup::default()).await;
+    s.at(2_000).await;
+    s.claim().await.unwrap();
+    let (a, b) = (s.authority.insecure_clone(), s.beneficiary.insecure_clone());
+    let payer = s.env.payer.pubkey();
+    let revive = system_instruction::transfer(&payer, &s.schedule, 5_000_000);
+
+    // close, then top the address up with lamports so that it looks alive, then use it: all in one transaction
+    let (close, claim) = (s.close_ix(), s.claim_ix());
+    let watched = s.watched();
+    let before = s.env.snapshot(&watched).await;
+    let result = s.env.send(&[close, revive.clone(), claim], &[&a, &b]).await;
+    assert_rejected("revival in one transaction: close, send lamports to the address, claim", result, 2, VestingError::WrongAccountOwner);
+    // the failed transaction was rolled back as a whole: the schedule is still there, untouched
+    s.env.assert_unchanged(&watched, &before).await;
+
+    // without the claim the same sequence succeeds, and what is left at the address is an empty system account
+    let close = s.close_ix();
+    s.env.send_ok(&[close, revive], &[&a]).await;
+    let account = s.env.account(&s.schedule).await.unwrap();
+    assert_eq!(account.owner, system_program::ID, "the closed account belongs to the system program again");
+    assert!(account.data.is_empty() && account.lamports == 5_000_000, "only the lamports that were sent remain");
+}
+
+#[tokio::test]
 async fn corrupt_accounting_in_the_stored_schedule_is_refused() {
     let mut s = halfway().await;
     patch_schedule(&mut s, |a| {
