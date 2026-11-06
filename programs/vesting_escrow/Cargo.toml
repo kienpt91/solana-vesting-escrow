@@ -1,0 +1,22 @@
+[package]
+name = "vesting_escrow"
+description = "Vesting escrow program: SPL tokens in a PDA-controlled vault, released on a cliff plus linear schedule"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# compile without the on-chain entrypoint symbol (used by tests, which call `processor::process_instruction`)
+no-entrypoint = []
+
+[dependencies]
+vesting_core = { path = "../../crates/vesting_core" }
+solana-program = "=1.18.26"
+spl-token = { version = "=4.0.0", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

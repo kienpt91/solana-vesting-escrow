@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/vesting_core",
+  "programs/vesting_escrow",
 ]
 
 [workspace.package]
