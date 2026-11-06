@@ -1,0 +1,37 @@
+# Dependency trees (cargo 1.95.0, from the committed Cargo.lock). Regenerate with:
+#   scripts/rs.sh 'cargo tree --locked --offline -p vesting_escrow -e normal --depth 1'
+
+== vesting_core (normal dependencies, depth 1) ==
+vesting_core v0.1.0 (/work/crates/vesting_core)
+
+== vesting_escrow (normal dependencies, depth 1) ==
+vesting_escrow v0.1.0 (/work/programs/vesting_escrow)
+├── solana-program v1.18.26
+├── spl-token v4.0.0
+└── vesting_core v0.1.0 (/work/crates/vesting_core)
+
+== vesting_client (normal dependencies, depth 1) ==
+vesting_client v0.1.0 (/work/crates/vesting_client)
+├── solana-program v1.18.26
+├── spl-token v4.0.0
+├── vesting_core v0.1.0 (/work/crates/vesting_core)
+└── vesting_escrow v0.1.0 (/work/programs/vesting_escrow)
+
+== vesting_tests (normal dependencies, depth 1) ==
+vesting_tests v0.1.0 (/work/crates/vesting_tests)
+├── solana-program v1.18.26
+├── solana-program-test v1.18.26
+├── solana-sdk v1.18.26
+├── spl-token v4.0.0
+├── tokio v1.51.6
+├── vesting_client v0.1.0 (/work/crates/vesting_client)
+├── vesting_core v0.1.0 (/work/crates/vesting_core)
+└── vesting_escrow v0.1.0 (/work/programs/vesting_escrow)
+
+== unique crates per tree (normal edges, the crate itself included) ==
+vesting_core 1
+vesting_escrow 152
+vesting_client 153
+vesting_tests 518
+
+== packages in Cargo.lock: 594, of which from crates.io: 590 ==
