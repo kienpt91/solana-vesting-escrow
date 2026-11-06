@@ -22,4 +22,8 @@ trap 'rm -f "$raw"' EXIT INT TERM
 # the exit status of cargo is kept: it is not the status of a pipeline's last command
 status=0
 cargo test $OPTS -p vesting_tests --test attacks -- --nocapture --test-threads=1 > "$raw" 2>&1 || status=$?
+if [ "$status" != 0 ]; then
+  echo "the last lines of the cargo output:" >&2
+  tail -n 40 "$raw" >&2
+fi
 sh scripts/attack-table.sh "$raw" "$status"
