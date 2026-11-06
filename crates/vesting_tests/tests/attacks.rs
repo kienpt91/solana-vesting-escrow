@@ -834,3 +834,259 @@ async fn closing_by_a_non_authority() {
     let ix = client::close(&ID, &beneficiary.pubkey(), &s.schedule, &s.mint, &s.beneficiary_token);
     reject(&mut s, "close by non-authority: the beneficiary", ix, &[&beneficiary], 0, VestingError::NotAuthority).await;
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// clock and instruction data
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn clock_manipulation_through_instruction_data() {
+    let mut s = Scenario::new(Setup { cliff: 500, ..Setup::default() }).await;
+    s.at(10).await; // far before the cliff
+    let b = s.beneficiary.insecure_clone();
+
+    // a time smuggled in after the instruction tag, as a fake "now" far in the future
+    let mut ix = s.claim_ix();
+    ix.data.extend_from_slice(&(T0 + 10 * DAY).to_le_bytes());
+    reject_with(
+        &mut s,
+        "clock manipulation: a timestamp appended to the claim data",
+        ix,
+        &[&b],
+        0,
+        InstructionError::InvalidInstructionData,
+    )
+    .await;
+
+    // the same without the tag: data made only of a timestamp
+    let mut ix = s.claim_ix();
+    ix.data = (T0 + 10 * DAY).to_le_bytes().to_vec();
+    reject_with(&mut s, "clock manipulation: claim data that is only a timestamp", ix, &[&b], 0, InstructionError::InvalidInstructionData)
+        .await;
+
+    // the claim itself still follows the sysvar clock
+    let ix = s.claim_ix();
+    reject(&mut s, "clock manipulation: the plain claim at that time is early", ix, &[&b], 0, VestingError::CliffNotReached).await;
+}
+
+#[tokio::test]
+async fn clock_manipulation_through_a_forged_clock_account() {
+    let mut s = Scenario::new(Setup { cliff: 500, ..Setup::default() }).await;
+    s.at(10).await;
+    let b = s.beneficiary.insecure_clone();
+
+    // an account that holds a Clock far in the future, owned by the sysvar program, at an address of the attacker's choosing
+    let mut clock: Clock = s.env.ctx.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = T0 + 10 * DAY;
+    let forged = Pubkey::new_unique();
+    let account = Account::new_data(1_000_000, &clock, &solana_sdk::sysvar::id()).unwrap();
+    s.env.set_account(&forged, account);
+
+    // appended as an extra account
+    let mut ix = s.claim_ix();
+    ix.accounts.push(AccountMeta::new_readonly(forged, false));
+    reject(&mut s, "clock manipulation: a forged clock account appended to the claim", ix, &[&b], 0, VestingError::UnexpectedAccounts)
+        .await;
+
+    // in the place of an expected account
+    let mut ix = s.claim_ix();
+    ix.accounts[5] = AccountMeta::new_readonly(forged, false);
+    reject(&mut s, "clock manipulation: a forged clock account in the token program slot", ix, &[&b], 0, VestingError::WrongTokenProgram)
+        .await;
+
+    // the real clock sysvar as an extra account is refused too: the program takes no sysvar accounts
+    let mut ix = s.claim_ix();
+    ix.accounts.push(AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false));
+    reject(&mut s, "clock manipulation: the clock sysvar passed as an account", ix, &[&b], 0, VestingError::UnexpectedAccounts).await;
+}
+
+#[tokio::test]
+async fn malformed_instruction_data_and_account_lists() {
+    let mut s = halfway().await;
+    let b = s.beneficiary.insecure_clone();
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("empty data", vec![]),
+        ("unknown tag", vec![9]),
+        ("claim with a trailing byte", vec![1, 0]),
+        ("revoke with a trailing byte", vec![2, 0]),
+        ("initialize with no fields", vec![0]),
+    ];
+    for (what, data) in cases {
+        let mut ix = s.claim_ix();
+        ix.data = data;
+        reject_with(&mut s, &format!("malformed data: {what}"), ix, &[&b], 0, InstructionError::InvalidInstructionData).await;
+    }
+    // a revocable flag that is neither 0 nor 1, and data one byte short
+    let mut fresh = Scenario::prepare(Setup::default()).await;
+    let mut init = client::initialize_schedule(&ID, &fresh.params);
+    let last = init.data.len() - 1;
+    init.data[last] = 2;
+    let result = init_attack(&mut fresh, init).await;
+    assert_rejected_with("malformed data: a revocable flag of 2", result, 1, InstructionError::InvalidInstructionData);
+    let mut init = client::initialize_schedule(&ID, &fresh.params);
+    init.data.pop();
+    let result = init_attack(&mut fresh, init).await;
+    assert_rejected_with("malformed data: initialize one byte short", result, 1, InstructionError::InvalidInstructionData);
+
+    // account lists: one too many, one too few
+    let mut ix = s.claim_ix();
+    ix.accounts.push(AccountMeta::new_readonly(Pubkey::new_unique(), false));
+    reject(&mut s, "account list: an extra account on claim", ix, &[&b], 0, VestingError::UnexpectedAccounts).await;
+    let mut ix = s.claim_ix();
+    ix.accounts.pop();
+    reject_with(&mut s, "account list: a missing account on claim", ix, &[&b], 0, InstructionError::NotEnoughAccountKeys).await;
+}
+
+#[tokio::test]
+async fn read_only_accounts_that_must_be_written() {
+    let mut s = halfway().await;
+    let (b, a) = (s.beneficiary.insecure_clone(), s.authority.insecure_clone());
+    for (what, slot) in [("the schedule", 1usize), ("the vault", 2), ("the destination", 3)] {
+        let mut ix = s.claim_ix();
+        ix.accounts[slot].is_writable = false;
+        reject(&mut s, &format!("read-only account: claim with {what} read-only"), ix, &[&b], 0, VestingError::AccountNotWritable).await;
+    }
+    let mut ix = s.close_ix();
+    ix.accounts[0].is_writable = false;
+    reject(&mut s, "read-only account: close with the rent receiver read-only", ix, &[&a], 0, VestingError::AccountNotWritable).await;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// token account state
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn frozen_accounts() {
+    let mut s = Scenario::new(Setup { freeze_authority: true, ..Setup::default() }).await;
+    s.at(500).await;
+    let b = s.beneficiary.insecure_clone();
+
+    s.env.freeze(&s.beneficiary_token, &s.mint).await;
+    let ix = s.claim_ix();
+    reject(&mut s, "frozen account: claim into a frozen destination", ix, &[&b], 0, VestingError::TokenAccountFrozen).await;
+
+    let mut s = Scenario::new(Setup { freeze_authority: true, ..Setup::default() }).await;
+    s.at(500).await;
+    s.env.freeze(&s.vault, &s.mint).await;
+    let (ix, b) = (s.claim_ix(), s.beneficiary.insecure_clone());
+    reject(&mut s, "frozen account: claim from a frozen vault", ix, &[&b], 0, VestingError::TokenAccountFrozen).await;
+
+    let mut fresh = Scenario::prepare(Setup { freeze_authority: true, ..Setup::default() }).await;
+    fresh.env.freeze(&fresh.creator_token, &fresh.mint).await;
+    let ix = client::initialize_schedule(&ID, &fresh.params);
+    let result = init_attack(&mut fresh, ix).await;
+    assert_rejected("frozen account: a frozen funding account", result, 1, VestingError::TokenAccountFrozen);
+}
+
+#[tokio::test]
+async fn a_vault_with_a_delegate_or_a_close_authority_is_refused() {
+    for (name, delegate) in [("a delegate", true), ("a close authority", false)] {
+        let mut s = halfway().await;
+        let mut state = TokenAccountState::unpack(&s.env.account(&s.vault).await.unwrap().data).unwrap();
+        if delegate {
+            state.delegate = Some(s.stranger.pubkey()).into();
+            state.delegated_amount = 1_000_000;
+        } else {
+            state.close_authority = Some(s.stranger.pubkey()).into();
+        }
+        let mut account = token_account_to_account(&state);
+        account.lamports = s.env.lamports(&s.vault).await;
+        s.env.set_account(&s.vault, account);
+        let (b, a) = (s.beneficiary.insecure_clone(), s.authority.insecure_clone());
+        let ix = s.claim_ix();
+        reject(&mut s, &format!("unsafe vault: claim from a vault that has {name}"), ix, &[&b], 0, VestingError::UnsafeVaultAuthority)
+            .await;
+        let ix = s.revoke_ix();
+        reject(&mut s, &format!("unsafe vault: revoke on a vault that has {name}"), ix, &[&a], 0, VestingError::UnsafeVaultAuthority).await;
+    }
+}
+
+#[tokio::test]
+async fn an_uninitialised_vault_is_refused() {
+    let mut s = halfway().await;
+    let mut account = s.env.account(&s.vault).await.unwrap();
+    let state = TokenAccountState { state: AccountState::Uninitialized, ..TokenAccountState::unpack(&account.data).unwrap() };
+    TokenAccountState::pack(state, &mut account.data).unwrap();
+    s.env.set_account(&s.vault, account);
+    let ix = s.claim_ix();
+    let b = s.beneficiary.insecure_clone();
+    reject_with(
+        &mut s,
+        "uninitialised vault: the token account state is Uninitialized",
+        ix,
+        &[&b],
+        0,
+        InstructionError::UninitializedAccount,
+    )
+    .await;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// attacks that need no program bug: what the runtime and the token program refuse
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn direct_withdrawal_from_the_vault_by_an_outsider() {
+    let mut s = halfway().await;
+    let stranger = s.stranger.insecure_clone();
+    // the attacker signs as the owner of the vault: it is not the owner
+    let ix = spl_token::instruction::transfer(&spl_token::ID, &s.vault, &s.stranger_token, &stranger.pubkey(), &[], 1).unwrap();
+    // OwnerMismatch of the SPL Token program
+    reject_with(&mut s, "direct withdrawal: the attacker signs as the vault's owner", ix, &[&stranger], 0, InstructionError::Custom(4))
+        .await;
+    // naming the schedule address as the authority without its signature
+    let mut ix = spl_token::instruction::transfer(&spl_token::ID, &s.vault, &s.stranger_token, &s.schedule, &[], 1).unwrap();
+    ix.accounts[2].is_signer = false;
+    reject_with(
+        &mut s,
+        "direct withdrawal: the schedule address as an unsigned authority",
+        ix,
+        &[],
+        0,
+        InstructionError::MissingRequiredSignature,
+    )
+    .await;
+    // taking over the vault by changing its owner
+    let ix = spl_token::instruction::set_authority(
+        &spl_token::ID,
+        &s.vault,
+        Some(&stranger.pubkey()),
+        spl_token::instruction::AuthorityType::AccountOwner,
+        &stranger.pubkey(),
+        &[],
+    )
+    .unwrap();
+    reject_with(&mut s, "direct withdrawal: set_authority on the vault by the attacker", ix, &[&stranger], 0, InstructionError::Custom(4))
+        .await;
+}
+
+#[tokio::test]
+async fn lamports_cannot_be_drained_from_the_schedule_account() {
+    let mut s = halfway().await;
+    let stranger = s.stranger.insecure_clone();
+    // a system transfer or assign that names the program-owned schedule account as its source can only be unsigned
+    let mut transfer = system_instruction::transfer(&s.schedule, &stranger.pubkey(), 1);
+    transfer.accounts[0].is_signer = false;
+    reject_with(
+        &mut s,
+        "lamport drain: a system transfer out of the schedule account",
+        transfer,
+        &[],
+        0,
+        InstructionError::MissingRequiredSignature,
+    )
+    .await;
+    let mut assign = system_instruction::assign(&s.schedule, &stranger.pubkey());
+    assign.accounts[0].is_signer = false;
+    reject_with(
+        &mut s,
+        "lamport drain: a system assign of the schedule account",
+        assign,
+        &[],
+        0,
+        InstructionError::MissingRequiredSignature,
+    )
+    .await;
+    let schedule = s.schedule;
+    assert!(s.env.lamports(&schedule).await > 0);
+}
