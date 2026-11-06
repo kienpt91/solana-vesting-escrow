@@ -285,8 +285,6 @@ fn revoke(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         return Err(VestingError::ScheduleRevoked.into());
     }
     let escrow = load_escrow(&state, schedule, vault, mint)?;
-    let to_beneficiary_account = token::load_account(beneficiary_token)?;
-    token::check_account(&to_beneficiary_account, &state.mint, &state.beneficiary)?;
     let to_authority_account = token::load_account(authority_token)?;
     token::check_account(&to_authority_account, &state.mint, &state.authority)?;
 
@@ -296,6 +294,12 @@ fn revoke(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         return Err(VestingError::FullyVested.into());
     }
     let split = core.revocation(now, state.claimed_amount).map_err(lift)?;
+    // the beneficiary's account matters only if it is paid: a revocation before the cliff owes the beneficiary
+    // nothing, and an account that cannot receive tokens (frozen, say) must not stall the authority's recovery
+    if split.to_beneficiary > 0 {
+        let to_beneficiary_account = token::load_account(beneficiary_token)?;
+        token::check_account(&to_beneficiary_account, &state.mint, &state.beneficiary)?;
+    }
 
     state.revoked = true;
     state.revoked_at = now;

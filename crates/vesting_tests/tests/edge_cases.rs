@@ -2,6 +2,7 @@
 //! settings and a clock that moves backwards.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use solana_sdk::signer::Signer;
 use vesting_client::{VestingError, MAX_DURATION_SECS};
 use vesting_core::Schedule;
 use vesting_tests::{expect, Scenario, Setup, T0};
@@ -181,4 +182,33 @@ async fn a_negative_clock_is_refused() {
     let mut s = Scenario::new(Setup::default()).await;
     s.env.set_time(-5).await;
     assert_eq!(s.claim().await, Err(expect(0, VestingError::InvalidClock)));
+}
+
+#[tokio::test]
+async fn a_revocation_that_pays_the_beneficiary_nothing_does_not_need_a_usable_beneficiary_account() {
+    // before the cliff nothing has vested: the beneficiary is owed nothing, so a frozen account of the beneficiary
+    // (the mint's freeze authority acting alone or with the beneficiary) cannot stall the authority's recovery
+    let mut s = Scenario::new(Setup { cliff: 500, freeze_authority: true, ..Setup::default() }).await;
+    s.env.freeze(&s.beneficiary_token, &s.mint).await;
+    s.at(100).await;
+    s.revoke().await.unwrap();
+    assert_eq!(s.authority_balance().await, 1_000_000, "the authority recovers everything");
+    assert_eq!(s.beneficiary_balance().await, 0);
+    assert!(s.state().await.revoked);
+}
+
+#[tokio::test]
+async fn a_revocation_that_pays_the_beneficiary_still_needs_a_usable_beneficiary_account() {
+    let mut s = Scenario::new(Setup { freeze_authority: true, ..Setup::default() }).await;
+    s.env.freeze(&s.beneficiary_token, &s.mint).await;
+    s.at(500).await;
+    assert_eq!(s.revoke().await, Err(expect(0, VestingError::TokenAccountFrozen)), "the vested half is owed to a frozen account");
+    // a destination of somebody else is refused whenever it would be paid
+    let mut s = Scenario::new(Setup::default()).await;
+    s.at(500).await;
+    let (a, ix) = (
+        s.authority.insecure_clone(),
+        vesting_client::revoke(&s.program_id(), &s.authority.pubkey(), &s.schedule, &s.mint, &s.stranger_token, &s.authority_token),
+    );
+    assert_eq!(s.env.send(&[ix], &[&a]).await, Err(expect(0, VestingError::WrongTokenAccountOwner)));
 }
