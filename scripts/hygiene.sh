@@ -33,7 +33,9 @@ case "$mode" in
     ;;
   --tree)
     for f in $(git ls-files); do
+      # the two guards name the patterns they reject
       [ "$f" = scripts/hygiene.sh ] && continue
+      [ "$f" = scripts/check-commit-msg.sh ] && continue
       [ "$f" = Cargo.lock ] && continue
       if git grep -I -n -E -i -q -e "$message_re" -- "$f"; then
         report "$f" "contains a tool name or signature"
