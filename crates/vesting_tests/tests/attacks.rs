@@ -556,3 +556,281 @@ async fn claim_after_a_revocation() {
     let b = s.beneficiary.insecure_clone();
     reject(&mut s, "claim after revocation: nothing more is owed", ix, &[&b], 0, VestingError::ScheduleRevoked).await;
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// revoke rules
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn revoke_by_non_authority() {
+    let mut s = halfway().await;
+    let stranger = s.stranger.insecure_clone();
+    let beneficiary = s.beneficiary.insecure_clone();
+    let creator = s.creator.insecure_clone();
+    let cases = [
+        ("a stranger", &stranger, s.stranger_token),
+        ("the beneficiary", &beneficiary, s.beneficiary_token),
+        ("the creator (the authority is another key)", &creator, s.creator_token),
+    ];
+    for (who, key, token) in cases {
+        let ix = client::revoke(&ID, &key.pubkey(), &s.schedule, &s.mint, &s.beneficiary_token, &token);
+        reject(&mut s, &format!("revoke by non-authority: {who}"), ix, &[key], 0, VestingError::NotAuthority).await;
+    }
+}
+
+#[tokio::test]
+async fn revoke_a_schedule_that_is_not_revocable() {
+    let mut s = Scenario::new(Setup { revocable: false, ..Setup::default() }).await;
+    s.at(500).await;
+    let ix = s.revoke_ix();
+    let a = s.authority.insecure_clone();
+    reject(&mut s, "revoke non-revocable: the authority tries anyway", ix, &[&a], 0, VestingError::NotRevocable).await;
+}
+
+#[tokio::test]
+async fn revoke_twice_and_revoke_after_everything_vested() {
+    let mut s = halfway().await;
+    s.revoke().await.unwrap();
+    let ix = s.revoke_ix();
+    let a = s.authority.insecure_clone();
+    reject(&mut s, "revoke twice: the second revocation", ix, &[&a], 0, VestingError::ScheduleRevoked).await;
+
+    let mut done = Scenario::new(Setup::default()).await;
+    done.at(1_000).await;
+    let (ix, a) = (done.revoke_ix(), done.authority.insecure_clone());
+    reject(&mut done, "revoke after fully vested: there is nothing to take back", ix, &[&a], 0, VestingError::FullyVested).await;
+}
+
+#[tokio::test]
+async fn revoke_payout_cannot_be_redirected() {
+    let mut s = halfway().await;
+    let a = s.authority.insecure_clone();
+    // the unvested remainder to somebody else's account
+    let ix = client::revoke(&ID, &a.pubkey(), &s.schedule, &s.mint, &s.beneficiary_token, &s.stranger_token);
+    reject(&mut s, "revoke payout: the remainder redirected to a stranger's account", ix, &[&a], 0, VestingError::WrongTokenAccountOwner)
+        .await;
+    // the vested part to somebody else's account
+    let ix = client::revoke(&ID, &a.pubkey(), &s.schedule, &s.mint, &s.stranger_token, &s.authority_token);
+    reject(&mut s, "revoke payout: the vested part redirected to a stranger's account", ix, &[&a], 0, VestingError::WrongTokenAccountOwner)
+        .await;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// beneficiary change
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn beneficiary_swap_by_a_stranger() {
+    let mut s = halfway().await;
+    let (stranger, authority, creator) = (s.stranger.insecure_clone(), s.authority.insecure_clone(), s.creator.insecure_clone());
+    for (who, key) in [("a stranger", &stranger), ("the authority", &authority), ("the creator", &creator)] {
+        let ix = client::propose_beneficiary(&ID, &key.pubkey(), &s.schedule, &stranger.pubkey());
+        reject(&mut s, &format!("beneficiary swap: {who} proposes a new beneficiary"), ix, &[key], 0, VestingError::NotBeneficiary).await;
+    }
+}
+
+#[tokio::test]
+async fn beneficiary_swap_acceptance_by_the_wrong_key() {
+    let mut s = halfway().await;
+    let (beneficiary, stranger) = (s.beneficiary.insecure_clone(), s.stranger.insecure_clone());
+    let friend = Keypair::new();
+
+    // accept with nothing pending
+    let ix = s.accept_ix(&stranger.pubkey());
+    reject(&mut s, "beneficiary swap: accept while no change is pending", ix, &[&stranger], 0, VestingError::NoPendingBeneficiary).await;
+
+    // the beneficiary proposes the friend; the stranger tries to accept in its place
+    let propose = s.propose_ix(&friend.pubkey());
+    s.env.send_ok(&[propose], &[&beneficiary]).await;
+    let ix = s.accept_ix(&stranger.pubkey());
+    reject(
+        &mut s,
+        "beneficiary swap: a stranger accepts a proposal made for another key",
+        ix,
+        &[&stranger],
+        0,
+        VestingError::NotPendingBeneficiary,
+    )
+    .await;
+
+    // the proposed key has not accepted: it cannot claim yet
+    let ix = client::claim(&ID, &friend.pubkey(), &s.schedule, &s.mint, &s.stranger_token);
+    reject(&mut s, "beneficiary swap: the proposed key claims before accepting", ix, &[&friend], 0, VestingError::NotBeneficiary).await;
+}
+
+#[tokio::test]
+async fn beneficiary_swap_to_invalid_keys() {
+    let mut s = halfway().await;
+    let beneficiary = s.beneficiary.insecure_clone();
+    for (what, key) in [("the default key", Pubkey::default()), ("the current beneficiary", beneficiary.pubkey())] {
+        let ix = s.propose_ix(&key);
+        reject(&mut s, &format!("beneficiary swap: propose {what}"), ix, &[&beneficiary], 0, VestingError::InvalidParty).await;
+    }
+}
+
+#[tokio::test]
+async fn initialize_with_the_default_key_as_beneficiary_or_authority() {
+    let mut s = Scenario::prepare(Setup::default()).await;
+    s.params.beneficiary = Pubkey::default();
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected("invalid party: the default key as beneficiary", result, 1, VestingError::InvalidParty);
+    s.params.beneficiary = s.beneficiary.pubkey();
+    s.params.authority = Pubkey::default();
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected("invalid party: the default key as authority", result, 1, VestingError::InvalidParty);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// duplicate accounts
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn duplicate_accounts_on_initialize() {
+    let mut s = Scenario::prepare(Setup::default()).await;
+    let vault = s.vault;
+    let cases: Vec<(&str, usize, Pubkey)> = vec![
+        ("the vault as the funding account", 3, vault),
+        ("the schedule as the vault", 4, s.schedule),
+        ("the creator wallet as the funding account", 3, s.creator.pubkey()),
+        ("the mint as the funding account", 3, s.mint),
+    ];
+    for (what, slot, key) in cases {
+        let mut ix = client::initialize_schedule(&ID, &s.params);
+        ix.accounts[slot] = AccountMeta::new(key, false);
+        let result = init_attack(&mut s, ix).await;
+        assert_rejected(&format!("duplicate accounts: initialize with {what}"), result, 1, VestingError::DuplicateAccount);
+    }
+}
+
+#[tokio::test]
+async fn duplicate_accounts_on_claim_revoke_and_close() {
+    let mut s = halfway().await;
+    let (b, a) = (s.beneficiary.insecure_clone(), s.authority.insecure_clone());
+    let (vault, schedule) = (s.vault, s.schedule);
+
+    let mut ix = s.claim_ix();
+    ix.accounts[3] = AccountMeta::new(vault, false);
+    reject(&mut s, "duplicate accounts: claim with the vault as the destination", ix, &[&b], 0, VestingError::DuplicateAccount).await;
+    let mut ix = s.claim_ix();
+    ix.accounts[2] = AccountMeta::new(schedule, false);
+    reject(&mut s, "duplicate accounts: claim with the schedule as the vault", ix, &[&b], 0, VestingError::DuplicateAccount).await;
+
+    let mut ix = s.revoke_ix();
+    ix.accounts[3] = AccountMeta::new(vault, false);
+    reject(&mut s, "duplicate accounts: revoke with the vault as the beneficiary's account", ix, &[&a], 0, VestingError::DuplicateAccount)
+        .await;
+    let mut ix = s.revoke_ix();
+    ix.accounts[4] = AccountMeta::new(vault, false);
+    reject(&mut s, "duplicate accounts: revoke with the vault as the authority's account", ix, &[&a], 0, VestingError::DuplicateAccount)
+        .await;
+    let mut ix = s.revoke_ix();
+    ix.accounts[3] = AccountMeta::new(schedule, false);
+    reject(
+        &mut s,
+        "duplicate accounts: revoke with the schedule as the beneficiary's account",
+        ix,
+        &[&a],
+        0,
+        VestingError::DuplicateAccount,
+    )
+    .await;
+
+    let mut ix = s.close_ix();
+    ix.accounts[3] = AccountMeta::new(vault, false);
+    reject(&mut s, "duplicate accounts: close with the vault as the authority's account", ix, &[&a], 0, VestingError::DuplicateAccount)
+        .await;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// amounts and arithmetic
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn overflow_amounts_on_initialize() {
+    // more than the creator holds
+    let mut s = Scenario::prepare(Setup::default()).await;
+    s.params.total_amount = u64::MAX;
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected("overflow amounts: a total of u64::MAX that the creator does not hold", result, 1, VestingError::InsufficientFunds);
+
+    // one token more than the creator holds
+    s.params.total_amount = 5_000_001;
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected("overflow amounts: one token more than the creator holds", result, 1, VestingError::InsufficientFunds);
+
+    // timestamps at the limits of i64
+    s.params.total_amount = 1;
+    s.params.start_ts = i64::MIN;
+    s.params.cliff_ts = i64::MIN;
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected("overflow amounts: a start of i64::MIN", result, 1, VestingError::NegativeTimestamp);
+    s.params.start_ts = T0;
+    s.params.cliff_ts = T0;
+    s.params.end_ts = i64::MAX;
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected("overflow amounts: an end of i64::MAX", result, 1, VestingError::DurationTooLong);
+    assert!(s.env.account(&s.schedule).await.is_none());
+}
+
+#[tokio::test]
+async fn funding_account_of_somebody_else() {
+    let mut s = Scenario::prepare(Setup::default()).await;
+    s.env.mint_to(&s.mint, &s.stranger_token, 5_000_000).await;
+    s.params.source_token = s.stranger_token;
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected(
+        "funding: the creator names another owner's token account as the source",
+        result,
+        1,
+        VestingError::WrongTokenAccountOwner,
+    );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// closing
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn closing_with_a_remaining_balance() {
+    let mut s = halfway().await;
+    let a = s.authority.insecure_clone();
+    let ix = s.close_ix();
+    reject(&mut s, "closing with a remaining balance: halfway through the schedule", ix, &[&a], 0, VestingError::NotSettled).await;
+
+    s.claim().await.unwrap();
+    let ix = s.close_ix();
+    reject(&mut s, "closing with a remaining balance: after a partial claim", ix, &[&a], 0, VestingError::NotSettled).await;
+
+    // everything has vested but the beneficiary has not collected: the authority cannot take the beneficiary's tokens
+    s.at(5_000).await;
+    let ix = s.close_ix();
+    reject(
+        &mut s,
+        "closing with a remaining balance: vested but unclaimed tokens are still in the vault",
+        ix,
+        &[&a],
+        0,
+        VestingError::NotSettled,
+    )
+    .await;
+    assert_eq!(s.vault_balance().await, 500_000);
+}
+
+#[tokio::test]
+async fn closing_by_a_non_authority() {
+    let mut s = Scenario::new(Setup::default()).await;
+    s.at(2_000).await;
+    s.claim().await.unwrap();
+    let (stranger, beneficiary) = (s.stranger.insecure_clone(), s.beneficiary.insecure_clone());
+    let ix = client::close(&ID, &stranger.pubkey(), &s.schedule, &s.mint, &s.stranger_token);
+    reject(&mut s, "close by non-authority: a stranger", ix, &[&stranger], 0, VestingError::NotAuthority).await;
+    let ix = client::close(&ID, &beneficiary.pubkey(), &s.schedule, &s.mint, &s.beneficiary_token);
+    reject(&mut s, "close by non-authority: the beneficiary", ix, &[&beneficiary], 0, VestingError::NotAuthority).await;
+}
