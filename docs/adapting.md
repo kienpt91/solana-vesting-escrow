@@ -31,7 +31,7 @@ extension list, and allow an explicit set of extensions only. Every extension on
 
 ## Port to Anchor
 
-The program is written so that a port is mechanical:
+The program is written so that the account logic ports without redesign (the build tooling does not: see below):
 
 * `ScheduleAccount` becomes an `#[account]` struct (`InitSpace`), the discriminator is Anchor's eight-byte hash, the version byte
   is dropped. Keep the checks that Anchor cannot express: the canonical bump comparison (`seeds`, `bump = schedule.bump`), the
@@ -48,9 +48,12 @@ The program is written so that a port is mechanical:
   lock file, run `scripts/check-crates-age.mjs`. The API differences are in imports (split `solana-*` crates), in
   `AccountInfo` handling, and in the program-test API.
 * SBF: build the program with the Solana toolchain (`cargo build-sbf`) and load the `.so` with a harness that runs bytecode
-  (LiteSVM or Mollusk are the usual choices). The test files do not need to change much: `Env` in
+  (`solana-program-test` with `SBF_OUT_DIR`, LiteSVM or Mollusk are the usual choices). `Env` in
   `crates/vesting_tests/src/lib.rs` is the only place that registers the program. Then add compute-unit assertions per
-  instruction, which this repository cannot do.
+  instruction, which this repository cannot do. **Do not expect this to be mechanical**: the lock file and `rust-version` of this
+  repository are newer than what a Solana 1.18-era toolchain's cargo accepts, so an SBF build needs its own lock file and a
+  lowered `rust-version` for the program tree. `docs/sbf-checklist.md` lists what was prepared (the `cdylib` crate type, static
+  checks for heap use and large arrays), the expected blockers and the order in which to verify the build.
 
 ## Deploy
 
