@@ -23,6 +23,7 @@ vesting_tests v0.1.0 (/work/crates/vesting_tests)
 ├── solana-program-test v1.18.26
 ├── solana-sdk v1.18.26
 ├── spl-token v4.0.0
+├── tarpc v0.29.0
 ├── tokio v1.51.6
 ├── vesting_client v0.1.0 (/work/crates/vesting_client)
 ├── vesting_core v0.1.0 (/work/crates/vesting_core)
