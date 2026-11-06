@@ -20,9 +20,12 @@ at least seven days old, and the machine has no validator.
    Token-2022 and associated token account programs, which the tests use unchanged: the token side of every test is real
    bytecode in the real BPF virtual machine.
 4. *Version.* `solana-program-test` 1.18.26 (with `solana-program` 1.18.26, `spl-token` 4.0.0). Newer families were tried:
-   2.0.x needs `protoc` to build, 2.1 to 3.x need a vendored OpenSSL build that needs perl modules the pinned image does not
-   ship, and 4.x also needs OpenSSL. None of those tools may be installed into the pinned image. 1.18.26 builds with nothing but
-   the image. The cost is an old ecosystem (see the README, "Dependencies") and no 2.x-only features.
+   2.0.25 needs `protoc` to build (the build failed on it); 2.1.x to 3.1.x resolve with a vendored OpenSSL (`openssl-src`), whose
+   build needs perl modules the pinned image does not ship (the 3.1.12 build failed on it; without the vendored build it needs
+   `pkg-config` and the OpenSSL headers, which are not in the image either); 4.x was not tried. None of those tools may be
+   installed into the pinned image. LiteSVM was considered and rejected: it runs SBF ELF files and its native hook takes the
+   runtime's internal builtin function type. 1.18.26 builds with nothing but the image. The cost is an old ecosystem (see
+   the README, "Dependencies") and no 2.x-only features.
 
 ## Decision
 

@@ -147,9 +147,14 @@ Why not SBF? The pinned Rust image has no SBF target (`rustc --print target-list
 `bpfeb-unknown-none`, which are a different instruction set) and the compiler that can target SBF ships with the Solana
 toolchain, which may not be downloaded under this repository's rules. Investigating first, as the brief asked: (a) SBF build
 inside the container: not possible with what is obtainable from aged crates and the official image; (b) in-process native tests
-through a harness: possible and used. Why not LiteSVM or a newer `solana-program-test`? LiteSVM loads SBF ELF files only. Newer
-`solana-program-test` versions need `protoc` (2.0.x) or a vendored OpenSSL build with perl modules (2.1 to 4.x) that the pinned
-image does not have, and nothing may be installed into it. Version 1.18.26 builds with the image alone (ADR 0006).
+through a harness: possible and used. Why not LiteSVM or a newer `solana-program-test`? LiteSVM runs SBF ELF files; its native
+hook (`add_builtin`) takes the runtime's internal builtin function type, not a `process_instruction(program_id, accounts, data)`
+entrypoint, so using it would need an adapter I did not write (and cargo reported that some crates of its 0.18 tree require
+Rust 1.98.1, newer than the pinned image). `solana-program-test` 2.0.25 needs `protoc` to build (the build was run and failed
+on it); 2.1.x to 3.1.x pull in a vendored OpenSSL (the lock resolution of 2.1.21, 2.2.20, 2.3.13, 3.0.0 and 3.1.12 contains
+`openssl-src`; the 3.1.12 build was run and failed on a perl module the image lacks; with `OPENSSL_NO_VENDOR` it then failed on
+the missing `pkg-config` and OpenSSL headers); 4.x was not tried. Nothing may be installed into the pinned image. Version 1.18.26
+builds with the image alone (ADR 0006).
 
 ## What the tests do not prove
 
