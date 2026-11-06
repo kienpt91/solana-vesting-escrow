@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/vesting_core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT"
+authors = ["Kien Phan"]
+repository = "https://github.com/kienpt91/solana-vesting-escrow"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+# the cfgs that the entrypoint macro of solana-program tests for
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))', 'cfg(feature, values("custom-heap", "custom-panic", "frozen-abi"))'] }
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+arithmetic_side_effects = "deny"
