@@ -216,9 +216,9 @@ vesting program measured while it runs natively in the bank):
 | Crate | Lines | Covered | Percent |
 | --- | ---: | ---: | ---: |
 | `vesting_core` (pure logic) | 103 | 103 | 100.0% |
-| `vesting_escrow` (program) | 646 | 637 | 98.6% |
+| `vesting_escrow` (program) | 649 | 640 | 98.6% |
 | `vesting_client` (SDK) | 126 | 126 | 100.0% |
-| all counted code | 875 | 866 | 99.0% |
+| all counted code | 878 | 869 | 99.0% |
 
 The nine uncovered lines are in `processor.rs` (seven) and `token.rs` (two): the rent-exemption check after creating the
 schedule account and the vault-growth check after funding (both defensive: the runtime and the fee-free classic token program
@@ -241,6 +241,7 @@ runs it with a window of seven days).
 | `solana-program-test` | `=1.18.26` | 2024-10-11 | tests | the in-process bank and the bundled SPL programs |
 | `solana-sdk` | `=1.18.26` | 2024-10-11 | tests | `Keypair`, `Transaction`, `Account`, `system_instruction` for the harness |
 | `tokio` (`macros`, `rt`) | `=1.51.6` | 2026-10-13 | tests | the async runtime that `BanksClient` needs |
+| `tarpc` (no default features) | `=0.29.0` | 2022-05-26 (already in the lock file through `solana-program-test`) | tests | the request context of `BanksClient`: the harness sets a long deadline, because a loaded machine made requests exceed the default ten seconds and fail tests that were right |
 
 No other direct dependency: no `borsh`, no `thiserror`, no `bytemuck`, no `anchor-*`. The program's own normal-dependency
 tree is 151 crates (`solana-program` and what it pulls in); the test crate's tree is 517 crates because of

@@ -33,6 +33,9 @@ All notable changes. Versions follow `[workspace.package] version` in `Cargo.tom
   keypair file names; `.gitignore` ignores keypair files in every directory.
 - `scripts/check-lock.sh`, `scripts/test-lock.sh` and `scripts/verify-lock.sh` check `Cargo.lock`; `docs/lockfile.md` records how it
   was made, including the hand-edited `wasm-bindgen` entries, and the CI `lockfile` job runs the verification.
+- The test harness gives every request to the in-process bank a long deadline (and retries reads and blockhash requests): on a
+  loaded machine the default ten seconds made an attack test fail with "the request exceeded its deadline" in some runs of
+  the full suite, found because the demo now fails when cargo fails. `tarpc` became a direct dependency of the test crate for it.
 - Documentation brought in line with the code: what is checked on every load, the stack-frame sentence, the same-transaction
   revival test, the findings table of the audit checklist.
 
