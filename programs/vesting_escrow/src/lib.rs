@@ -11,6 +11,7 @@
 
 mod codec;
 pub mod error;
+pub mod state;
 
 use solana_program::pubkey::Pubkey;
 
