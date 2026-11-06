@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    # a new version is proposed only after it has been published for 7 days
+    cooldown:
+      default-days: 7
+    # the Solana crates move together and are pinned exactly on purpose (docs/adr/0006); update them by hand
+    ignore:
+      - dependency-name: "solana-*"
+      - dependency-name: "spl-*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
