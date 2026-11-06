@@ -4,6 +4,7 @@ members = [
   "crates/vesting_core",
   "programs/vesting_escrow",
   "crates/vesting_client",
+  "crates/vesting_tests",
 ]
 
 [workspace.package]
