@@ -9,6 +9,11 @@ authors.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# `cdylib` is what `cargo build-sbf` links into the program's shared object; `lib` is what the tests and the client use.
+# The host build here produces a native shared library of no use on a cluster; no SBF build was made (docs/sbf-checklist.md).
+[lib]
+crate-type = ["cdylib", "lib"]
+
 [features]
 # compile without the on-chain entrypoint symbol (used by tests, which call `processor::process_instruction`)
 no-entrypoint = []

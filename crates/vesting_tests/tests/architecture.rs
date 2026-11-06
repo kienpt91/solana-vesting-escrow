@@ -250,3 +250,110 @@ fn every_test_named_in_the_documentation_exists() {
     }
     assert!(checked > 80, "the documents should name many tests; found only {checked}");
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// what can be checked about SBF without the SBF toolchain (docs/sbf-checklist.md lists what cannot)
+// ---------------------------------------------------------------------------------------------------------
+
+/// The code of a source file without comments and without everything after the first `#[cfg(test)]`.
+fn code_lines(text: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        if line.trim_start().starts_with("#[cfg(test)]") {
+            break;
+        }
+        let code = line.split("//").next().unwrap_or("").to_string();
+        if !code.trim().is_empty() {
+            out.push((i + 1, code));
+        }
+    }
+    out
+}
+
+const PROGRAM_LOGIC_FILES: [&str; 5] = ["processor.rs", "state.rs", "validation.rs", "token.rs", "codec.rs"];
+
+#[test]
+fn the_account_handling_code_does_not_allocate() {
+    // SBF gives a program a 32 KiB bump heap that is never freed: an allocation per instruction is a budget to account for.
+    // The instruction handlers, the state codec, the validation layer and the token helpers allocate nothing (the client-side
+    // `VestingInstruction::pack` allocates and lives in instruction.rs, which no handler calls).
+    let banned = [
+        "vec!",
+        "Vec<",
+        "Vec::",
+        "Box::",
+        "Box<",
+        "String",
+        "format!",
+        ".to_string()",
+        ".to_owned()",
+        ".collect(",
+        "to_vec()",
+        "HashMap",
+        "BTreeMap",
+    ];
+    for name in PROGRAM_LOGIC_FILES {
+        let path = root().join("programs/vesting_escrow/src").join(name);
+        for (line, code) in code_lines(&read(&path)) {
+            for word in banned {
+                assert!(!code.contains(word), "{name}:{line} allocates (`{word}`): {}", code.trim());
+            }
+            if code.contains("msg!(") {
+                assert!(
+                    !code.contains('{') || code.contains("msg!(\"") && !code.contains("{}"),
+                    "{name}:{line}: msg! with formatting arguments costs compute units and heap: {}",
+                    code.trim()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn no_stack_array_is_larger_than_a_small_bound() {
+    // SBF stack frames are 4 KiB per function. A large array on the stack is the usual way to blow one. The program has no
+    // array with a numeric length above this bound (the largest value is the 272 byte schedule record, which is a struct).
+    const BOUND: u64 = 128;
+    for file in rust_files(&root().join("programs/vesting_escrow/src")) {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        for (line, code) in code_lines(&read(&file)) {
+            let mut rest = code.as_str();
+            while let Some(at) = rest.find(';') {
+                let after = &rest[at + 1..];
+                if let Some(end) = after.find(']') {
+                    let length = after[..end].trim();
+                    if let Ok(n) = length.parse::<u64>() {
+                        assert!(
+                            n <= BOUND,
+                            "{name}:{line}: an array of {n} elements; keep stack arrays at {BOUND} or below: {}",
+                            code.trim()
+                        );
+                    }
+                }
+                rest = after;
+            }
+        }
+    }
+}
+
+#[test]
+fn the_crate_type_lets_cargo_build_sbf_link_the_program() {
+    // `cargo build-sbf` needs a `cdylib` to produce the shared object; the tests and the client need the `lib`
+    let manifest = crate_manifest("vesting_escrow");
+    let compact: String = manifest.split_whitespace().collect();
+    assert!(
+        compact.contains("[lib]crate-type=[\"cdylib\",\"lib\"]"),
+        "programs/vesting_escrow/Cargo.toml must declare crate-type cdylib and lib"
+    );
+}
+
+#[test]
+fn every_cpi_signs_with_seeds_built_from_the_stored_state() {
+    // CPI signer seeds come from one place, built from the stored creator, mint, id and bump: no handler assembles its own
+    let processor = read(&root().join("programs/vesting_escrow/src/processor.rs"));
+    assert!(processor.contains("SignerSeeds::new(") && processor.contains("seeds.slices()"));
+    let token = read(&root().join("programs/vesting_escrow/src/token.rs"));
+    assert_eq!(token.matches("invoke_signed(").count(), 2, "exactly the vault transfer and the vault close sign with seeds");
+    assert_eq!(token.matches("invoke(").count(), 1, "the funding transfer is signed by the creator's own signature");
+    assert_eq!(processor.matches("find_program_address").count(), 0, "the processor derives through pda.rs only");
+}

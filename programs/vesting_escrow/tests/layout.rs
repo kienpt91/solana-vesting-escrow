@@ -297,3 +297,23 @@ fn the_vault_is_the_associated_token_account_of_the_schedule() {
     assert_ne!(vault_address(&schedule, &mint), vault_address(&schedule, &key(6)));
     assert_eq!(ASSOCIATED_TOKEN_PROGRAM_ID.to_string(), "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 }
+
+#[test]
+fn the_values_the_handlers_keep_on_the_stack_stay_small() {
+    // A heuristic, not a measurement: the stack frame of a function on SBF is 4 KiB and the compiler decides what is spilled.
+    // These are the sizes of the values the largest handler (`initialize_schedule`) holds at once.
+    use core::mem::size_of;
+    let schedule = size_of::<ScheduleAccount>();
+    let params = size_of::<InitializeSchedule>();
+    let instruction = size_of::<VestingInstruction>();
+    let token_account = size_of::<spl_token::state::Account>();
+    let mint = size_of::<spl_token::state::Mint>();
+    assert!(schedule <= 320, "ScheduleAccount is {schedule} bytes");
+    assert!(params <= 128, "InitializeSchedule is {params} bytes");
+    assert!(instruction <= 128, "VestingInstruction is {instruction} bytes");
+    assert!(token_account <= 192, "a token account is {token_account} bytes");
+    assert!(mint <= 96, "a mint is {mint} bytes");
+    let at_once = schedule + params + instruction + 2 * token_account + mint;
+    assert!(at_once <= 1_280, "{at_once} bytes held at once in initialize_schedule; the 4 KiB frame would be at risk");
+    println!("sizes: schedule {schedule}, params {params}, instruction {instruction}, token account {token_account}, mint {mint}, at once {at_once}");
+}
