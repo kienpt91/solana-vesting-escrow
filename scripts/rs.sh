@@ -17,7 +17,8 @@
 # limited to 4 CPUs and 8 GiB. The machine is shared: run one heavy job at a time.
 #
 # Image: the official `rust` image pinned by digest (never by tag): Rust 1.95.0, built 2026-05-20.
-# Override with RS_IMAGE only to try another pinned digest.
+# Override with RS_IMAGE only to try another pinned digest. RS_CARGO_VOLUME names another cargo volume (scripts/verify-lock.sh
+# uses a throwaway one, so that every crate is downloaded and checked against the lock file again).
 set -eu
 
 image=${RS_IMAGE:-rust@sha256:d7482085ff5b415f84dba5647ae71606650bdef00db7aeb69f4b3d170c3e4082}
@@ -26,8 +27,15 @@ net=none
 if [ "${1:-}" = "--net" ]; then
   net=bridge
   shift
-  case "${1:-}" in
-    "cargo fetch --locked"*) ;;
+  [ "$#" -eq 1 ] || { echo "usage: rs.sh [--net] '<shell command>'" >&2; exit 2; }
+  # The command is run by `sh -c` with network access, so it may contain nothing but letters, digits, spaces and the
+  # characters of package names and versions (. _ @ + -): no `;`, `&`, `|`, `$`, backtick, quote, redirection or newline
+  # can chain a second command behind an allowed one.
+  case "$1" in
+    *[!A-Za-z0-9\ _.@+-]*) echo "rs.sh: --net refuses a command with shell metacharacters" >&2; exit 2 ;;
+  esac
+  case "$1" in
+    "cargo fetch --locked") ;;
     "rustup component add "*) ;;
     "cargo generate-lockfile") [ ! -e "$(dirname "$0")/../Cargo.lock" ] || { echo "rs.sh: Cargo.lock exists" >&2; exit 2; } ;;
     "cargo update -p "*" --precise "*) ;;
@@ -38,7 +46,7 @@ fi
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 name=$(basename "$repo")
-cvol="$name-cargo"; tvol="$name-target"; rvol="$name-rustup"
+cvol=${RS_CARGO_VOLUME:-$name-cargo}; tvol="$name-target"; rvol="$name-rustup"
 for v in "$cvol" "$tvol" "$rvol"; do docker volume create "$v" > /dev/null; done
 # volumes are created root-owned: hand them to the calling user once and seed the rustup home from the image
 # (this step needs no network and exits)
