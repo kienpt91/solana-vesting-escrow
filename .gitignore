@@ -1,0 +1,34 @@
+# build output
+/target/
+*.profraw
+*.profdata
+/cov/
+.DS_Store
+
+# secret files: never commit these (see scripts/secret-scan.sh)
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+.netrc
+/credentials.json
+service-account*.json
+/secrets.json
+/secrets.yml
+/secrets.yaml
+/secrets.toml
+*.tfstate
+*.tfstate.*
+
+# keypair files written by Solana tooling: test keypairs are generated in memory at runtime and never stored
+/keypair*.json
+/*-keypair.json
+/id.json
