@@ -41,12 +41,58 @@ pub const TOKEN_2022_ID: Pubkey = vesting_escrow::token::TOKEN_2022_PROGRAM_ID;
 /// Why a transaction failed, reduced to what a test asserts on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Failure {
-    /// The instruction at `index` returned `error`.
-    Instruction { index: u8, error: InstructionError },
+    /// The instruction at `index`, which was addressed to `program`, returned `error`. The program matters: the
+    /// meaning of `Custom(code)` is the table of the program that returned it.
+    Instruction { index: u8, program: Pubkey, error: InstructionError },
     /// The transaction failed before or outside an instruction (signatures, fees, account locks).
     Transaction(TransactionError),
     /// The client could not send or simulate it.
     Client(String),
+}
+
+/// The names of the SPL Token program's errors, indexed by code.
+fn token_error_name(code: u32) -> Option<String> {
+    use spl_token::error::TokenError as E;
+    let all = [
+        E::NotRentExempt,
+        E::InsufficientFunds,
+        E::InvalidMint,
+        E::MintMismatch,
+        E::OwnerMismatch,
+        E::FixedSupply,
+        E::AlreadyInUse,
+        E::InvalidNumberOfProvidedSigners,
+        E::InvalidNumberOfRequiredSigners,
+        E::UninitializedState,
+        E::NativeNotSupported,
+        E::NonNativeHasBalance,
+        E::InvalidInstruction,
+        E::InvalidState,
+        E::Overflow,
+        E::AuthorityTypeNotSupported,
+        E::MintCannotFreeze,
+        E::AccountFrozen,
+        E::MintDecimalsMismatch,
+        E::NonNativeNotSupported,
+    ];
+    all.iter().find(|e| (*e).clone() as u32 == code).map(|e| format!("{e:?}"))
+}
+
+/// A short name for the program that returned an error.
+pub fn program_label(program: &Pubkey) -> String {
+    if *program == vesting_escrow::ID {
+        "vesting program".to_string()
+    } else if *program == spl_token::ID {
+        "SPL Token program".to_string()
+    } else if *program == TOKEN_2022_ID {
+        "Token-2022 program".to_string()
+    } else if *program == solana_sdk::system_program::ID {
+        "system program".to_string()
+    } else if *program == vesting_client::ASSOCIATED_TOKEN_PROGRAM_ID {
+        "associated token account program".to_string()
+    } else {
+        format!("program {program}")
+    }
 }
 
 impl Failure {
@@ -66,25 +112,36 @@ impl Failure {
         }
     }
 
-    /// One line for tables and assertion messages.
+    /// One line for tables and assertion messages. A custom code is named from the table of the program that
+    /// returned it: the vesting program's, the SPL Token program's, or none (system program codes are numbers).
     pub fn describe(&self) -> String {
         match self {
-            Failure::Instruction { index, error: InstructionError::Custom(code) } => {
-                format!("instruction {index}: {}", vesting_client::describe_error(*code))
+            Failure::Instruction { index, program, error } => {
+                let who = program_label(program);
+                let what = match error {
+                    InstructionError::Custom(code) if *program == vesting_escrow::ID => vesting_client::describe_error(*code),
+                    InstructionError::Custom(code) if *program == spl_token::ID => match token_error_name(*code) {
+                        Some(name) => format!("{name} ({code})"),
+                        None => format!("custom code {code}"),
+                    },
+                    InstructionError::Custom(code) => format!("custom code {code}"),
+                    other => format!("{other:?}"),
+                };
+                format!("instruction {index} [{who}]: {what}")
             }
-            Failure::Instruction { index, error } => format!("instruction {index}: {error:?}"),
             Failure::Transaction(e) => format!("transaction: {e:?}"),
             Failure::Client(e) => format!("client: {e}"),
         }
     }
-}
 
-impl From<BanksClientError> for Failure {
-    fn from(e: BanksClientError) -> Self {
+    /// Reads a failure of the bank. `instructions` are the ones of the transaction: they say which program the
+    /// failing instruction was addressed to.
+    pub fn from_bank(e: BanksClientError, instructions: &[Instruction]) -> Self {
         match e {
             BanksClientError::TransactionError(TransactionError::InstructionError(index, error))
             | BanksClientError::SimulationError { err: TransactionError::InstructionError(index, error), .. } => {
-                Failure::Instruction { index, error }
+                let program = instructions.get(usize::from(index)).map_or_else(Pubkey::default, |ix| ix.program_id);
+                Failure::Instruction { index, program, error }
             }
             BanksClientError::TransactionError(e) | BanksClientError::SimulationError { err: e, .. } => Failure::Transaction(e),
             other => Failure::Client(other.to_string()),
@@ -134,7 +191,7 @@ impl Env {
         let mut all: Vec<&Keypair> = vec![&self.payer];
         all.extend_from_slice(signers);
         let tx = Transaction::new_signed_with_payer(instructions, Some(&self.payer.pubkey()), &all, blockhash);
-        self.ctx.banks_client.process_transaction(tx).await.map_err(Failure::from)
+        self.ctx.banks_client.process_transaction(tx).await.map_err(|e| Failure::from_bank(e, instructions))
     }
 
     /// Sends a transaction that is signed by exactly the given keypairs, the first of which pays the fee. Used by
@@ -144,7 +201,7 @@ impl Env {
         let mut all: Vec<&Keypair> = vec![fee_payer];
         all.extend_from_slice(signers);
         let tx = Transaction::new_signed_with_payer(instructions, Some(&fee_payer.pubkey()), &all, blockhash);
-        self.ctx.banks_client.process_transaction(tx).await.map_err(Failure::from)
+        self.ctx.banks_client.process_transaction(tx).await.map_err(|e| Failure::from_bank(e, instructions))
     }
 
     /// Sends the instructions and panics unless they succeed.
@@ -513,7 +570,7 @@ pub fn token_account_to_account(state: &TokenAccountState) -> Account {
     Account { lamports: 2_039_280, data, owner: spl_token::ID, executable: false, rent_epoch: 0 }
 }
 
-/// The error a failed instruction must carry, as a `Failure` for `assert_eq!`.
+/// The error the vesting program must return at instruction `index`, as a `Failure` for `assert_eq!`.
 pub fn expect(index: u8, error: VestingError) -> Failure {
-    Failure::Instruction { index, error: InstructionError::Custom(error.code()) }
+    Failure::Instruction { index, program: vesting_escrow::ID, error: InstructionError::Custom(error.code()) }
 }

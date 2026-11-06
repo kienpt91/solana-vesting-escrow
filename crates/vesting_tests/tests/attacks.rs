@@ -12,10 +12,11 @@ use solana_sdk::{
     system_instruction, system_program,
     sysvar::clock::Clock,
 };
+use spl_token::error::TokenError;
 use spl_token::state::{Account as TokenAccountState, AccountState};
 use vesting_client::{self as client, VestingError, ID};
 use vesting_escrow::pda::SCHEDULE_SEED;
-use vesting_tests::attack::{assert_rejected, assert_rejected_with};
+use vesting_tests::attack::{assert_rejected, assert_rejected_by, assert_rejected_with};
 use vesting_tests::{token_account_to_account, Failure, Scenario, Setup, DAY, T0, TOKEN_2022_ID};
 
 // byte offsets of the schedule account layout (docs/accounts.md)
@@ -47,6 +48,31 @@ async fn reject_with(s: &mut Scenario, name: &str, ix: Instruction, signers: &[&
     let result = s.env.send(&[ix], &refs).await;
     assert_rejected_with(name, result, index, error);
     s.env.assert_unchanged(&watched, &before).await;
+}
+
+/// Like [`reject_with`] for a hostile instruction addressed straight to another program (the token program, the system
+/// program): the error and the program that must return it.
+async fn reject_by(
+    s: &mut Scenario,
+    name: &str,
+    ix: Instruction,
+    signers: &[&Keypair],
+    index: u8,
+    program: &Pubkey,
+    error: InstructionError,
+) {
+    let watched = s.watched();
+    let before = s.env.snapshot(&watched).await;
+    let signers = clones(signers);
+    let refs: Vec<&Keypair> = signers.iter().collect();
+    let result = s.env.send(&[ix], &refs).await;
+    assert_rejected_by(name, result, index, program, error);
+    s.env.assert_unchanged(&watched, &before).await;
+}
+
+/// The custom error code of a token program error.
+fn token_error(e: TokenError) -> InstructionError {
+    InstructionError::Custom(e as u32)
 }
 
 /// A funded schedule, halfway through its vesting.
@@ -1031,18 +1057,26 @@ async fn direct_withdrawal_from_the_vault_by_an_outsider() {
     let stranger = s.stranger.insecure_clone();
     // the attacker signs as the owner of the vault: it is not the owner
     let ix = spl_token::instruction::transfer(&spl_token::ID, &s.vault, &s.stranger_token, &stranger.pubkey(), &[], 1).unwrap();
-    // OwnerMismatch of the SPL Token program
-    reject_with(&mut s, "direct withdrawal: the attacker signs as the vault's owner", ix, &[&stranger], 0, InstructionError::Custom(4))
-        .await;
+    reject_by(
+        &mut s,
+        "direct withdrawal: the attacker signs as the vault's owner",
+        ix,
+        &[&stranger],
+        0,
+        &spl_token::ID,
+        token_error(TokenError::OwnerMismatch),
+    )
+    .await;
     // naming the schedule address as the authority without its signature
     let mut ix = spl_token::instruction::transfer(&spl_token::ID, &s.vault, &s.stranger_token, &s.schedule, &[], 1).unwrap();
     ix.accounts[2].is_signer = false;
-    reject_with(
+    reject_by(
         &mut s,
         "direct withdrawal: the schedule address as an unsigned authority",
         ix,
         &[],
         0,
+        &spl_token::ID,
         InstructionError::MissingRequiredSignature,
     )
     .await;
@@ -1056,8 +1090,16 @@ async fn direct_withdrawal_from_the_vault_by_an_outsider() {
         &[],
     )
     .unwrap();
-    reject_with(&mut s, "direct withdrawal: set_authority on the vault by the attacker", ix, &[&stranger], 0, InstructionError::Custom(4))
-        .await;
+    reject_by(
+        &mut s,
+        "direct withdrawal: set_authority on the vault by the attacker",
+        ix,
+        &[&stranger],
+        0,
+        &spl_token::ID,
+        token_error(TokenError::OwnerMismatch),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1067,23 +1109,25 @@ async fn lamports_cannot_be_drained_from_the_schedule_account() {
     // a system transfer or assign that names the program-owned schedule account as its source can only be unsigned
     let mut transfer = system_instruction::transfer(&s.schedule, &stranger.pubkey(), 1);
     transfer.accounts[0].is_signer = false;
-    reject_with(
+    reject_by(
         &mut s,
         "lamport drain: a system transfer out of the schedule account",
         transfer,
         &[],
         0,
+        &system_program::ID,
         InstructionError::MissingRequiredSignature,
     )
     .await;
     let mut assign = system_instruction::assign(&s.schedule, &stranger.pubkey());
     assign.accounts[0].is_signer = false;
-    reject_with(
+    reject_by(
         &mut s,
         "lamport drain: a system assign of the schedule account",
         assign,
         &[],
         0,
+        &system_program::ID,
         InstructionError::MissingRequiredSignature,
     )
     .await;
