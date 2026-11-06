@@ -13,9 +13,13 @@ mod codec;
 pub mod error;
 pub mod instruction;
 pub mod pda;
+pub mod processor;
 pub mod state;
 pub mod token;
 pub mod validation;
+
+#[cfg(not(feature = "no-entrypoint"))]
+mod entrypoint;
 
 use solana_program::pubkey::Pubkey;
 
