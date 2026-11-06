@@ -323,3 +323,236 @@ async fn token_2022_is_refused_as_program_and_as_mint() {
     let result = init_attack(&mut s, ix).await;
     assert_rejected("Token-2022: a Token-2022 mint with the classic token program", result, 1, VestingError::UnsupportedTokenProgram);
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// addresses and bumps
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn wrong_pda_a_non_canonical_bump_address_at_initialize() {
+    let mut id = 1;
+    // find a schedule id whose address has a lower valid bump (almost every id does); mint and creator are fixed by Scenario
+    let mut s = Scenario::prepare(Setup::default()).await;
+    let (nc, nc_bump) = loop {
+        s.params.schedule_id = id;
+        if let Some(found) = non_canonical(&s.creator.pubkey(), &s.mint, id) {
+            break found;
+        }
+        id += 1;
+    };
+    s.schedule = s.params.schedule(&ID);
+    let (_, canonical) = client::schedule_address(&ID, &s.creator.pubkey(), &s.mint, id);
+    assert!(nc_bump < canonical);
+    let mut ix = client::initialize_schedule(&ID, &s.params);
+    ix.accounts[1] = AccountMeta::new(nc, false);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected("wrong PDA: a valid address with a non-canonical bump as the schedule", result, 1, VestingError::WrongScheduleAddress);
+    assert!(s.env.account(&nc).await.is_none());
+}
+
+#[tokio::test]
+async fn wrong_pda_an_address_of_another_creator_or_id() {
+    let mut s = Scenario::prepare(Setup::default()).await;
+    let other_creator = Keypair::new().pubkey();
+    let others = [
+        ("another creator", client::schedule_address(&ID, &other_creator, &s.mint, 1).0),
+        ("another id", client::schedule_address(&ID, &s.creator.pubkey(), &s.mint, 99).0),
+        ("a random address", Pubkey::new_unique()),
+    ];
+    for (what, address) in others {
+        let mut ix = client::initialize_schedule(&ID, &s.params);
+        ix.accounts[1] = AccountMeta::new(address, false);
+        let result = init_attack(&mut s, ix).await;
+        assert_rejected(&format!("wrong PDA: {what} as the schedule address"), result, 1, VestingError::WrongScheduleAddress);
+    }
+}
+
+#[tokio::test]
+async fn wrong_pda_forged_schedule_at_a_non_canonical_address() {
+    // a hostile state no transaction could create: a program-owned copy of the schedule at a non-canonical bump address
+    let mut id = 1;
+    let mut s = loop {
+        let s = Scenario::new(Setup { schedule_id: id, ..Setup::default() }).await;
+        if non_canonical(&s.creator.pubkey(), &s.mint, id).is_some() {
+            break s;
+        }
+        id += 1;
+    };
+    let (nc, nc_bump) = non_canonical(&s.creator.pubkey(), &s.mint, id).unwrap();
+    let mut forged = s.env.account(&s.schedule).await.unwrap();
+    forged.data[OFFSET_BUMP] = nc_bump;
+    s.env.set_account(&nc, forged);
+    s.at(500).await;
+    let b = s.beneficiary.insecure_clone();
+    let ix = client::claim(&ID, &b.pubkey(), &nc, &s.mint, &s.beneficiary_token);
+    reject(&mut s, "wrong PDA: a forged schedule copy at a non-canonical bump address", ix, &[&b], 0, VestingError::WrongScheduleAddress)
+        .await;
+}
+
+#[tokio::test]
+async fn wrong_bump_stored_in_the_schedule_does_not_match_the_canonical_bump() {
+    let mut id = 1;
+    let mut s = loop {
+        let s = Scenario::new(Setup { schedule_id: id, ..Setup::default() }).await;
+        if non_canonical(&s.creator.pubkey(), &s.mint, id).is_some() {
+            break s;
+        }
+        id += 1;
+    };
+    let (_, nc_bump) = non_canonical(&s.creator.pubkey(), &s.mint, id).unwrap();
+    patch_schedule(&mut s, |a| a.data[OFFSET_BUMP] = nc_bump).await;
+    s.at(500).await;
+    let ix = s.claim_ix();
+    let b = s.beneficiary.insecure_clone();
+    reject(&mut s, "wrong bump: the stored bump is not the canonical bump", ix, &[&b], 0, VestingError::WrongScheduleAddress).await;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// initialisation attacks
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn reinitialisation_of_a_live_schedule() {
+    let mut s = halfway().await;
+    s.at(500).await;
+    s.claim().await.unwrap(); // claimed 500_000
+                              // the creator tries to create the same schedule again, with a different beneficiary and a reset claimed amount
+    s.params.beneficiary = s.stranger.pubkey();
+    let before_state = s.state().await;
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let watched = s.watched();
+    let before = s.env.snapshot(&watched).await;
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected_with("reinitialisation: initialize on a live schedule address", result, 1, InstructionError::AccountAlreadyInitialized);
+    s.env.assert_unchanged(&watched, &before).await;
+    assert_eq!(s.state().await, before_state);
+}
+
+#[tokio::test]
+async fn reinitialisation_of_a_program_owned_account_with_zeroed_data() {
+    let mut s = Scenario::prepare(Setup::default()).await;
+    let rent = s.env.ctx.banks_client.get_rent().await.unwrap();
+    let zeroed = Account {
+        lamports: rent.minimum_balance(client::SCHEDULE_ACCOUNT_SIZE),
+        data: vec![0; client::SCHEDULE_ACCOUNT_SIZE],
+        owner: ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    s.env.set_account(&s.schedule, zeroed);
+    let ix = client::initialize_schedule(&ID, &s.params);
+    let result = init_attack(&mut s, ix).await;
+    assert_rejected_with(
+        "reinitialisation: initialize over a program-owned zeroed account",
+        result,
+        1,
+        InstructionError::AccountAlreadyInitialized,
+    );
+
+    // and such an account is useless for every other instruction
+    let b = s.beneficiary.insecure_clone();
+    let claim = s.claim_ix();
+    let result = s.env.send(&[claim], &[&b]).await;
+    assert_rejected_with(
+        "uninitialised schedule: claim on a zeroed program-owned account",
+        result,
+        0,
+        InstructionError::InvalidAccountData,
+    );
+}
+
+#[tokio::test]
+async fn truncated_and_padded_schedule_data_is_refused() {
+    for (name, len) in [("truncated", client::SCHEDULE_ACCOUNT_SIZE - 1), ("padded", client::SCHEDULE_ACCOUNT_SIZE + 1)] {
+        let mut s = halfway().await;
+        patch_schedule(&mut s, |a| a.data.resize(len, 0)).await;
+        let ix = s.claim_ix();
+        let b = s.beneficiary.insecure_clone();
+        let result = s.env.send(&[ix], &[&b]).await;
+        assert_rejected_with(&format!("layout: {name} schedule data"), result, 0, InstructionError::InvalidAccountData);
+    }
+}
+
+#[tokio::test]
+async fn a_closed_schedule_cannot_be_used_or_revived() {
+    let mut s = Scenario::new(Setup::default()).await;
+    s.at(2_000).await;
+    s.claim().await.unwrap();
+    s.close().await.unwrap();
+    let b = s.beneficiary.insecure_clone();
+    let ix = s.claim_ix();
+    let result = s.env.send(&[ix], &[&b]).await;
+    assert_rejected("closed account: claim on a closed schedule", result, 0, VestingError::WrongAccountOwner);
+
+    // somebody sends lamports to the closed address to keep it alive: it is still an empty system account
+    s.env.airdrop(&s.schedule, 5_000_000).await;
+    let account = s.env.account(&s.schedule).await.unwrap();
+    assert_eq!(account.owner, system_program::ID);
+    assert!(account.data.is_empty());
+    let ix = s.claim_ix();
+    let result = s.env.send(&[ix], &[&b]).await;
+    assert_rejected("closed account: claim on a closed schedule that received lamports", result, 0, VestingError::WrongAccountOwner);
+}
+
+#[tokio::test]
+async fn corrupt_accounting_in_the_stored_schedule_is_refused() {
+    let mut s = halfway().await;
+    patch_schedule(&mut s, |a| {
+        let total = u64::from_le_bytes(a.data[216..224].try_into().unwrap());
+        a.data[OFFSET_CLAIMED..OFFSET_CLAIMED + 8].copy_from_slice(&total.saturating_add(1).to_le_bytes());
+    })
+    .await;
+    let ix = s.claim_ix();
+    let b = s.beneficiary.insecure_clone();
+    reject(&mut s, "arithmetic: claimed amount above the total in the stored state", ix, &[&b], 0, VestingError::CorruptSchedule).await;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// claim rules
+// ---------------------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn double_claim_in_one_transaction() {
+    let mut s = halfway().await;
+    let b = s.beneficiary.insecure_clone();
+    let watched = s.watched();
+    let before = s.env.snapshot(&watched).await;
+    let result = s.env.send(&[s.claim_ix(), s.claim_ix()], &[&b]).await;
+    assert_rejected("double claim: the same claim twice in one transaction", result, 1, VestingError::NothingToClaim);
+    // the first claim was rolled back with the transaction
+    s.env.assert_unchanged(&watched, &before).await;
+    assert_eq!(s.beneficiary_balance().await, 0);
+
+    // the same claim twice in two transactions: the second pays nothing
+    s.claim().await.unwrap();
+    let ix = s.claim_ix();
+    reject(&mut s, "double claim: the same claim again in a later transaction", ix, &[&b], 0, VestingError::NothingToClaim).await;
+    assert_eq!(s.beneficiary_balance().await, 500_000);
+}
+
+#[tokio::test]
+async fn claim_before_the_cliff() {
+    let mut s = Scenario::new(Setup { cliff: 500, ..Setup::default() }).await;
+    s.at(499).await;
+    let ix = s.claim_ix();
+    let b = s.beneficiary.insecure_clone();
+    reject(&mut s, "claim before the cliff: one second early", ix, &[&b], 0, VestingError::CliffNotReached).await;
+}
+
+#[tokio::test]
+async fn claim_before_the_start() {
+    let mut s = Scenario::new(Setup { start: 100, cliff: 100, end: 1_100, ..Setup::default() }).await;
+    let ix = s.claim_ix();
+    let b = s.beneficiary.insecure_clone();
+    reject(&mut s, "claim before the start: the schedule has not begun", ix, &[&b], 0, VestingError::CliffNotReached).await;
+}
+
+#[tokio::test]
+async fn claim_after_a_revocation() {
+    let mut s = halfway().await;
+    s.revoke().await.unwrap();
+    s.at(2_000).await;
+    let ix = s.claim_ix();
+    let b = s.beneficiary.insecure_clone();
+    reject(&mut s, "claim after revocation: nothing more is owed", ix, &[&b], 0, VestingError::ScheduleRevoked).await;
+}
