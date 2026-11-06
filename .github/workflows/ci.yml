@@ -32,6 +32,8 @@ jobs:
         run: sh scripts/rs.sh 'cargo clippy --workspace --all-targets --locked --offline -- -D warnings'
       - name: Tests, layer by layer
         run: sh scripts/rs.sh 'sh scripts/test-layers.sh'
+      - name: Demo; it fails when cargo fails or when a row of the attack table is missing
+        run: sh scripts/rs.sh 'sh scripts/demo.sh' > /dev/null
       - name: Build the program (host build: the SBF toolchain is not part of this repository's tooling)
         run: sh scripts/rs.sh 'cargo build -p vesting_escrow --release --locked --offline && cargo build -p vesting_escrow --release --features no-entrypoint --locked --offline'
 
@@ -47,14 +49,20 @@ jobs:
       - run: sh scripts/rs.sh --net 'cargo fetch --locked'
       - run: sh scripts/rs.sh 'sh scripts/coverage.sh'
 
-  release-scripts:
-    # The shell tests of the release scripts; they need only git and a POSIX shell.
+  scripts:
+    # The shell tests of the scripts: release scripts, the attack table checker, the container wrapper's allow list, the secret
+    # scanner's Solana rules and the lock file checks. They need only git and a POSIX shell.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: sh scripts/test-release.sh
+      - run: sh scripts/test-demo.sh
+      - run: sh scripts/test-rs.sh
+      - run: sh scripts/test-secret-scan.sh
+      - run: sh scripts/test-lock.sh
+      - run: sh scripts/check-lock.sh
 
   secret-scan:
     runs-on: ubuntu-latest
@@ -73,8 +81,24 @@ jobs:
       - name: Check every commit message and identity
         run: sh scripts/hygiene.sh --history
 
+  lockfile:
+    # Cargo.lock against a fresh registry download: every crate is fetched into a throwaway cargo volume, so cargo checks each
+    # checksum again (the file contains hand-edited entries, docs/lockfile.md), the lock file must resolve unchanged, and no locked
+    # crate may be newer than the cutoff of the repository.
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: sh scripts/verify-lock.sh
+
   crate-age:
-    # Every locked crate must have been published at least seven days ago.
+    # Every locked crate must have been published at least seven days ago (a window that moves with the date; the lockfile job
+    # checks the fixed cutoff of the repository).
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

@@ -35,8 +35,8 @@ jobs:
           TAG: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: sh scripts/check-release-tag.sh "$TAG"
-      - name: Release scripts
-        run: sh scripts/test-release.sh
+      - name: Shell tests of the scripts
+        run: sh scripts/test-release.sh && sh scripts/test-demo.sh && sh scripts/test-rs.sh && sh scripts/test-secret-scan.sh && sh scripts/test-lock.sh && sh scripts/check-lock.sh
       - name: Secret scan and hygiene
         run: sh scripts/secret-scan.sh --tree && sh scripts/secret-scan.sh --history && sh scripts/hygiene.sh --tree && sh scripts/hygiene.sh --history
       - run: sh scripts/rs.sh --net 'rustup component add clippy rustfmt'

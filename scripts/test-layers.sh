@@ -7,6 +7,7 @@
 #   client        the instruction builders (account order, signer and writable flags, data)
 #   happy paths   every instruction on its intended path, on the in-process bank
 #   edge cases    boundary values and schedule bounds, on the in-process bank
+#   harness       the test harness itself: error labels and the numbering of the attack rows
 #   attacks       hostile transactions, each expecting one precise error and no state change
 #   architecture  the dependency and purity rules checked on manifests, lock file and sources
 set -eu
@@ -29,6 +30,7 @@ layer "program"      cargo test $OPTS -p vesting_escrow
 layer "client"       cargo test $OPTS -p vesting_client
 layer "happy paths"  cargo test $OPTS -p vesting_tests --test happy_paths
 layer "edge cases"   cargo test $OPTS -p vesting_tests --test edge_cases
+layer "harness"      cargo test $OPTS -p vesting_tests --test harness
 layer "attacks"      cargo test $OPTS -p vesting_tests --test attacks
 layer "architecture" cargo test $OPTS -p vesting_tests --test architecture
 printf '%-14s %d passed\n' "total" "$passed_all"
