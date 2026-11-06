@@ -3,7 +3,8 @@
 The checklist used to review a Solana program, and the format of a review deliverable. For a client review, copy this
 file, keep the headings, replace the "vesting_escrow" column with the result for the reviewed program and add findings to
 the table at the end. For this repository the right-hand column is filled in as a worked example: it says what was
-checked and where the evidence is. It is a self-review by the author, not an independent audit.
+checked and where the evidence is. It is a self-review by the author, not an independent audit; one independent read-only review of the repository
+was done afterwards and its findings, with what was done about each, are in section 9.
 
 Result values: **PASS** (checked, no issue), **FINDING** (see the findings table), **N/A** (the program has no such surface),
 **NOT CHECKED** (say why).
@@ -69,7 +70,7 @@ Result values: **PASS** (checked, no issue), **FINDING** (see the findings table
 | 5.2 | Initialisation cannot be blocked by pre-funding the address | PASS: `create_schedule_account` handles a non-zero balance |
 | 5.3 | Accounts are rent exempt after creation and cannot be drained below it | PASS: checked after creation; only `close` removes lamports |
 | 5.4 | Closing zeroes the data, moves all lamports, reassigns the owner to the system program and sets the length to zero | PASS: `close_program_account`; `close_after_completion_*`, `a_closed_schedule_cannot_be_used_or_revived` |
-| 5.5 | A closed account cannot be revived within the same transaction or by a lamport donation | PASS: `a_closed_schedule_cannot_be_used_or_revived` |
+| 5.5 | A closed account cannot be revived within the same transaction or by a lamport donation | PASS: `a_closed_schedule_cannot_be_used_or_revived` (lamports sent in a later transaction), `a_closed_schedule_cannot_be_revived_in_the_same_transaction` (close, send lamports, claim, in one transaction) |
 | 5.6 | Closing is only possible when nothing is owed, and only by the party entitled to the rent | PASS: `closing_with_a_remaining_balance`, `closing_by_a_non_authority` |
 | 5.7 | Donated tokens or lamports cannot block a lifecycle step | PASS: `a_donation_to_the_vault_is_swept_to_the_authority_on_close` |
 
@@ -89,7 +90,7 @@ Result values: **PASS** (checked, no issue), **FINDING** (see the findings table
 | # | Item | vesting_escrow |
 | ---: | --- | --- |
 | 7.1 | Who holds the upgrade authority, is it a multisig, is there a timelock, can it be revoked | N/A: not deployed. A deployment note must state this |
-| 7.2 | Program data account and verifiable build (same source, same hash) | NOT CHECKED: no SBF build exists under this repository's tooling policy (README) |
+| 7.2 | Program data account and verifiable build (same source, same hash) | NOT CHECKED: no SBF build exists under this repository's tooling policy (README); preparation and the open items are in `docs/sbf-checklist.md` |
 | 7.3 | Program id declared in source matches the deployment | N/A: the id in `lib.rs` is a placeholder; the program derives everything from the id the runtime passes in |
 | 7.4 | Fee payer and rent payer roles, and who receives refunds | PASS: the creator pays rent, the authority receives it back on close (`docs/accounts.md`) |
 
@@ -103,14 +104,25 @@ Result values: **PASS** (checked, no issue), **FINDING** (see the findings table
 | 8.4 | Sysvar accounts passed by the caller instead of read from the syscall | PASS: none are accepted; `clock_manipulation_through_a_forged_clock_account` |
 | 8.5 | Instruction data parsing: trailing bytes, unknown tags, flag values | PASS: `instruction_data_is_parsed_strictly`, `malformed_data_*` |
 | 8.6 | Panics reachable from user input (`unwrap`, indexing, slicing) | PASS: `unwrap_used`, `expect_used`, `indexing_slicing`, `panic` denied by clippy in the program and the pure crate |
-| 8.7 | Compute budget and stack/heap on the target VM | NOT CHECKED: the tests execute the program natively (README) |
+| 8.7 | Compute budget and stack/heap on the target VM | NOT CHECKED: the tests execute the program natively (README). Static checks only: no allocation in the handlers, no large stack array, small value sizes (`docs/sbf-checklist.md`) |
 | 8.8 | Logging that leaks or misleads | PASS: one fixed line per instruction, no user data |
 
 ## 9. Findings
 
-| ID | Severity | Where | Description | Recommendation | Status |
-| --- | --- | --- | --- | --- | --- |
-| (none recorded for this repository) | | | | | |
+One independent read-only review was done after the first version of this repository. It found no exploitable flaw in the
+on-chain logic; its findings concerned the evidence, the tooling claims, SBF readiness and the documentation. Status as of the
+commit that fixed them:
+
+| ID | Severity | Where | Description | Status |
+| --- | --- | --- | --- | --- |
+| R1 | Low | `scripts/demo.sh` | The attack table dropped the first row of every attack test (libtest glues `test NAME ... ` in front of it), so "66 hostile transactions" was wrong (the real number is in `docs/demo-output.txt`), and the exit status of cargo was masked | Fixed: rows start on their own line and are numbered; `scripts/attack-table.sh` keeps cargo's status and refuses gaps, repeats, FAIL rows, fewer rows than tests and a missing summary; `scripts/test-demo.sh` tests it; `architecture.rs` ties the figure in README and SECURITY to the demo output |
+| R2 | Low | `crates/vesting_tests/src/lib.rs` | A token program error code was printed with the name of the vesting error of the same number | Fixed: a failure records the program it came from and is named from that program's table (`harness.rs`); the direct-attack tests assert the token program's `OwnerMismatch` by program |
+| R3 | Low | build | No `cdylib` crate type; lock file format 4 and `rust-version 1.95` against a Solana 1.18-era toolchain | Crate type fixed. Lock file and `rust-version`: documented, not changed, because the effect on an SBF build cannot be verified without the toolchain (`docs/sbf-checklist.md`) |
+| R4 | Low | `scripts/rs.sh` | The `--net` allow list was a prefix match and could be chained | Fixed: only letters, digits, spaces and `. _ @ + -` are accepted, and the commands match exactly (`scripts/test-rs.sh`) |
+| R5 | Low | `scripts/secret-scan.sh`, `.gitignore` | No rule for Solana keypair files, patterns anchored to the root | Fixed: keypair array and base58 rules, file names, unanchored ignore patterns (`scripts/test-secret-scan.sh`) |
+| R6 | Info | docs | Statements stronger than the code: "checked on every load"; the stack-frame sentence; "same transaction" revival; "no findings" | Fixed: reworded (`docs/accounts.md`, README), a same-transaction test added, this table filled in. The pending proposal is now cleared on revocation |
+| R7 | Info | `processor.rs::revoke` | A frozen beneficiary account blocked a revocation even when the beneficiary was owed nothing | Fixed: the account is checked only when it is paid (`edge_cases.rs`); the case where it is paid stays a documented trade-off (ADR 0004) |
+| R8 | Info | `Cargo.lock` | Crates with known advisories (Solana 1.18 family); hand-edited `wasm-bindgen` entries | Accepted and disclosed; the hand edits are listed and verifiable (`docs/lockfile.md`, `scripts/verify-lock.sh`); no advisory database was queried |
 
 Severity scale: **Critical** (loss of funds without special preconditions), **High** (loss of funds with preconditions or
 permanent lock-up), **Medium** (denial of service, wrong accounting without loss), **Low** (hardening), **Info**.
