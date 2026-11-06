@@ -47,15 +47,24 @@ scripts/rs.sh 'cargo fmt --all -- --check'
 scripts/rs.sh 'cargo clippy --workspace --all-targets --locked --offline -- -D warnings'
 scripts/rs.sh 'sh scripts/test-layers.sh'                                       # all tests, with a count per layer
 scripts/rs.sh 'cargo build -p vesting_escrow --release --locked --offline'      # host build of the program
-scripts/rs.sh 'sh scripts/demo.sh'                                              # curve, lifecycle, attack table
+scripts/rs.sh 'sh scripts/demo.sh' > docs/demo-output.txt                       # curve, lifecycle, attack table (fails if a row is missing)
 scripts/rs.sh 'sh scripts/coverage.sh'                                          # line coverage per crate
+sh scripts/test-release.sh && sh scripts/test-demo.sh && sh scripts/test-rs.sh \
+  && sh scripts/test-secret-scan.sh && sh scripts/test-lock.sh                  # the shell tests of the scripts (no docker needed)
 sh scripts/secret-scan.sh --tree && sh scripts/hygiene.sh --tree               # no secrets, no tool names or personal paths
-node scripts/check-crates-age.mjs . 7                                           # every locked crate is at least 7 days old
+sh scripts/verify-lock.sh                                                       # the lock file against a fresh registry download, plus the age check
+node scripts/check-crates-age.mjs . 7                                           # every locked crate is at least 7 days old (verify-lock runs it too)
 ```
 
-The first build compiles about 600 crates (several minutes, about 9 GiB of target volume with the coverage build). One heavy job
-at a time: the wrapper is meant for a shared machine. `rustup component add` is the only network use besides `cargo fetch`; the
-`--net` flag of the wrapper refuses every other command.
+The first build compiles about 600 crates (several minutes) and the target volume, with the coverage build, grows to roughly
+10 GiB inside Docker's disk image: keep room on the host disk. A full host disk makes Docker fail with input/output errors,
+which happened once while this repository was being prepared. One heavy job at a time: the wrapper is meant for a shared machine.
+
+`rustup component add` and `cargo fetch --locked` are the only network uses of the wrapper, and `--net` accepts exactly those
+commands (plus `cargo generate-lockfile` while there is no lock file, and `cargo update -p NAME@VERSION --precise VERSION` for
+one crate): the command must consist of letters, digits, spaces and `. _ @ + -` only, so nothing can be chained behind an
+allowed command; `scripts/test-rs.sh` tests this against a stub `docker`. The wrapper is a convenience for a local
+machine, not a sandbox: it passes the repository directory to the container and trusts the pinned image.
 
 ## Architecture
 
@@ -86,7 +95,8 @@ crates/vesting_tests       in-process harness (solana-program-test) and the suit
 
 `crates/vesting_tests/tests/attacks.rs` sends hostile transactions at a funded schedule. Every test names the attack, expects
 exactly one error at exactly one instruction and then checks that no watched account changed. Run
-`scripts/rs.sh 'sh scripts/demo.sh'` to print all 66 hostile transactions with the error expected and observed (the output of
+`scripts/rs.sh 'sh scripts/demo.sh'` to print all 118 hostile transactions with the error expected, the error observed and the program that returned it (the demo fails when cargo
+fails or when a row is missing: `scripts/attack-table.sh`) (the output of
 a real run is in `docs/demo-output.txt`; the addresses in its second part differ from run to run, because the keypairs are generated
 at run time).
 
@@ -103,7 +113,7 @@ at run time).
 | Fake system program | a made-up id, or the token program, in the system program slot | `WrongSystemProgram` | `fake_system_program_on_initialize` |
 | Wrong PDA / bump | a valid address with a non-canonical bump; another creator's or id's address; a forged program-owned copy at a non-canonical address; a stored bump that is not canonical | `WrongScheduleAddress` | `wrong_pda_a_non_canonical_bump_address_at_initialize`, `wrong_pda_an_address_of_another_creator_or_id`, `wrong_pda_forged_schedule_at_a_non_canonical_address`, `wrong_bump_stored_in_the_schedule_does_not_match_the_canonical_bump` |
 | Reinitialisation | `initialize_schedule` again on a live schedule, or over a program-owned zeroed account; use of a zeroed, truncated or padded account | `AccountAlreadyInitialized`, `InvalidAccountData` | `reinitialisation_of_a_live_schedule`, `reinitialisation_of_a_program_owned_account_with_zeroed_data`, `truncated_and_padded_schedule_data_is_refused` |
-| Revival | use of a closed schedule, also after lamports were sent to its address | `WrongAccountOwner` | `a_closed_schedule_cannot_be_used_or_revived` |
+| Revival | use of a closed schedule, also after lamports were sent to its address, in a later transaction and in the same transaction as the close | `WrongAccountOwner` | `a_closed_schedule_cannot_be_used_or_revived`, `a_closed_schedule_cannot_be_revived_in_the_same_transaction` |
 | Double claim | the same `claim` twice in one transaction (the whole transaction is rolled back) and in two | `NothingToClaim` | `double_claim_in_one_transaction` |
 | Claim before the cliff | one second early; before the start | `CliffNotReached` | `claim_before_the_cliff`, `claim_before_the_start` |
 | Claim after revocation | the beneficiary claims after the authority revoked | `ScheduleRevoked` | `claim_after_a_revocation` |
@@ -161,16 +171,21 @@ builds with the image alone (ADR 0006).
 * **Compute units.** A native build is not metered like SBF. How many units each instruction costs, and whether
   `find_program_address` on every instruction fits a realistic budget with several CPIs, is unmeasured.
 * **Stack and heap limits.** SBF has 4 KiB stack frames and a 32 KiB heap; the host has megabytes. A function that is fine here
-  can overflow there. The code keeps frames small (no large arrays, the largest value is a 165-byte token account) but that is
-  a review claim, not a test result.
+  can overflow there. What exists is static: no stack array above 128 elements, no allocation in the handlers, and the sizes of
+  the values `initialize_schedule` holds at once (the 264-byte schedule record, 112-byte parameters, 112-byte instruction, two
+  176-byte token accounts and an 88-byte mint: 928 bytes together in the host layout, `layout.rs`). That is a heuristic: the real
+  frame size is decided by the SBF compiler, which reports it, and was never run (`docs/sbf-checklist.md`).
 * **The syscall path.** In a test the program calls `Clock::get`, `Rent::get`, `find_program_address` and `invoke_signed`
   through `solana-program-test`'s stubs, which call into the runtime in Rust. The BPF syscall implementations (pointer
   translation, memory regions, account data realloc across CPI) are not exercised for the vesting program.
-* **The SBF build itself**: whether the program compiles for the SBF target, its size, whether it loads on a cluster.
+* **The SBF build itself**: whether the program compiles for the SBF target, its size, whether it loads on a cluster. The
+  crate type is set for it (`cdylib` and `lib`), but the lock file (format 4) and `rust-version = "1.95"` are, as I recall, newer
+  than what a Solana 1.18-era `cargo` accepts, so an SBF build needs its own lock file and a lowered `rust-version`; the port is
+  not mechanical (`docs/sbf-checklist.md`, `docs/adapting.md`).
 * **A real cluster**: fees, priority, versioned transactions, address lookup tables, durable nonces, clock drift, upgradeable
   loader behaviour.
 * **Token-2022** and wrapped SOL: refused or untested, by design (threat model).
-* **Absence of bugs.** 140 passing tests are 140 passing tests. See "Where to attack first".
+* **Absence of bugs.** 154 passing tests are 154 passing tests. See "Where to attack first".
 
 ## Tests and coverage
 
@@ -178,13 +193,17 @@ builds with the image alone (ADR 0006).
 | --- | --- | ---: |
 | core: validation, worked examples | `crates/vesting_core/tests/schedule_examples.rs` | 20 |
 | core: seeded property tests | `crates/vesting_core/tests/properties.rs` | 9 |
-| program: layout, instruction data, errors, addresses | `programs/vesting_escrow/tests/layout.rs` | 13 |
+| program: layout, instruction data, errors, addresses, value sizes | `programs/vesting_escrow/tests/layout.rs` | 14 |
 | client: instruction builders | `crates/vesting_client/tests/builders.rs` | 6 |
-| happy paths (in-process bank) | `crates/vesting_tests/tests/happy_paths.rs` | 20 |
-| edge cases (in-process bank) | `crates/vesting_tests/tests/edge_cases.rs` | 12 |
-| attacks (in-process bank, 66 hostile transactions) | `crates/vesting_tests/tests/attacks.rs` | 52 |
-| architecture rules | `crates/vesting_tests/tests/architecture.rs` | 8 |
-| **total** | | **140** |
+| happy paths (in-process bank) | `crates/vesting_tests/tests/happy_paths.rs` | 21 |
+| edge cases (in-process bank) | `crates/vesting_tests/tests/edge_cases.rs` | 14 |
+| attacks (in-process bank, 118 hostile transactions) | `crates/vesting_tests/tests/attacks.rs` | 53 |
+| the harness itself: error labels, attack row numbering | `crates/vesting_tests/tests/harness.rs` | 4 |
+| architecture rules, SBF static checks, documentation checks | `crates/vesting_tests/tests/architecture.rs` | 13 |
+| **total** | | **154** |
+
+The shell tests of the scripts are separate from these counts: `scripts/test-release.sh` (29 checks), `scripts/test-demo.sh` (16),
+`scripts/test-rs.sh` (22), `scripts/test-secret-scan.sh` (14) and `scripts/test-lock.sh` (10); none needs docker.
 
 The property tests use a seeded SplitMix64 generator (no external crate) and check: vested is monotonic and never above the
 total; nothing vests before the cliff and everything at the end; rounding is exactly the floor and never overpays; claims at
@@ -233,13 +252,14 @@ advisories (RUSTSEC-2024-0344, RUSTSEC-2022-0093; recalled from memory, **no adv
 `cargo deny` were not run: they are not in the image and the policy allows no further network). Those crates come through
 `solana-program`/`solana-sdk` and `solana-program-test`; the vesting code does not call them directly.
 
-**How the lock file was made.** `cargo generate-lockfile` once, then every crate newer than the cutoff was stepped back:
-fourteen with `cargo update -p NAME@VERSION --precise OLDER` (a single crate each time: `async-compression`, `cc`,
-`compression-codecs`, `crc32fast`, `ctutils`, `encoding_rs`, `log`, `mime`, `test-case`, `test-case-core`, `test-case-macros`,
-`toml_edit`, `utf8_iter`, `winnow`), and the seven crates of the `wasm-bindgen` family (`wasm-bindgen`, `-macro`,
-`-macro-support`, `-shared`, `-futures`, `js-sys`, `web-sys`, which pin each other with `=` and cannot be stepped back one by
-one) by editing their versions and checksums in `Cargo.lock` by hand, after which `cargo metadata --locked` accepts the file.
-No blanket `cargo update` was run. The wrapper refuses `cargo update` without `-p ... --precise`.
+**How the lock file was made.** `cargo generate-lockfile` once, then the 22 crates newer than the cutoff were stepped back:
+fourteen with `cargo update -p NAME@VERSION --precise OLDER` (one crate each time), and the seven crates of the `wasm-bindgen`
+family, which pin each other with `=` and cannot be stepped back one by one, by **editing their versions and checksums in
+`Cargo.lock` by hand**. No blanket `cargo update` was run; the wrapper refuses it. `docs/lockfile.md` lists every change with its
+checksum. The hand edits are verified, not trusted: `scripts/verify-lock.sh` downloads every locked crate again into a throwaway
+cargo volume (cargo then compares each download with the checksum in the lock file; a deliberately corrupted checksum was
+confirmed to fail there), checks that `cargo metadata --locked` resolves the workspace unchanged, and runs the age check;
+`scripts/check-lock.sh` checks the sources and checksum fields statically. CI runs both (job `lockfile`).
 
 ## Limitations
 
@@ -267,7 +287,8 @@ If you review this, in this order:
 4. **Token account validation** (`token.rs`): everything the program does not check on payee accounts (it allows delegates and
    close authorities there, on purpose) and on the mint (it allows a freeze authority).
 5. **The pure maths** (`schedule.rs`) against your own oracle, at `u64::MAX` and at the ten-year bound.
-6. **What the native tests cannot see**: compute units of `find_program_address` on every instruction, stack frames, the SBF build.
+6. **What the native tests cannot see**: compute units of `find_program_address` on every instruction, stack frames, the SBF build,
+   account closing and account data after a CPI on the real runtime (`docs/sbf-checklist.md`, items 1 to 5).
 
 ## Layout
 
