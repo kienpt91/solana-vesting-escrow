@@ -41,7 +41,8 @@ The review checklist applied to this program is `docs/audit-checklist.md`. The c
 | Vault delegates and close authorities, frozen accounts are refused | `attacks.rs::a_vault_with_a_delegate_or_a_close_authority_is_refused`, `attacks.rs::frozen_accounts` |
 | A donation of lamports or tokens cannot block creation or closing | `happy_paths.rs::lamports_sent_to_the_schedule_address_first_do_not_block_creation`, `happy_paths.rs::a_donation_to_the_vault_is_swept_to_the_authority_on_close` |
 
-`scripts/demo.sh` prints every hostile transaction with the error expected and the error observed (`docs/demo-output.txt`).
+`scripts/demo.sh` prints every hostile transaction with the error expected, the error observed and the program that returned it
+(`docs/demo-output.txt`: 118 hostile transactions in one recorded run; the demo fails if a row is missing or cargo fails).
 
 ## Not covered
 

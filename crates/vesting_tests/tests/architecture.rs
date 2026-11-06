@@ -357,3 +357,62 @@ fn every_cpi_signs_with_seeds_built_from_the_stored_state() {
     assert_eq!(token.matches("invoke(").count(), 1, "the funding transfer is signed by the creator's own signature");
     assert_eq!(processor.matches("find_program_address").count(), 0, "the processor derives through pda.rs only");
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// the number of hostile transactions is counted, not written by hand
+// ---------------------------------------------------------------------------------------------------------
+
+/// The number in "N hostile transactions" at the end of the recorded demo output, after checking that it agrees with the rows.
+fn recorded_hostile_transactions() -> usize {
+    let output = read(&root().join("docs/demo-output.txt"));
+    let rows = output
+        .lines()
+        .filter(|l| l.split_whitespace().nth(1) == Some("PASS") && l.split_whitespace().next().is_some_and(|n| n.parse::<usize>().is_ok()))
+        .count();
+    let summary = output
+        .lines()
+        .find(|l| l.contains(" hostile transactions, "))
+        .unwrap_or_else(|| panic!("docs/demo-output.txt has no summary line"));
+    let words: Vec<&str> = summary.split_whitespace().collect();
+    let total: usize = words[0].parse().unwrap();
+    let rejected: usize = words[3].parse().unwrap();
+    let not_rejected: usize = words[words.len() - 2].parse().unwrap();
+    assert_eq!(total, rows, "the summary of docs/demo-output.txt counts {total} transactions but the file has {rows} rows");
+    assert_eq!(rejected, total, "every recorded transaction must be rejected exactly as expected");
+    assert_eq!(not_rejected, 0);
+    // row numbers are 1..=N in order
+    let numbers: Vec<usize> = output
+        .lines()
+        .filter(|l| l.split_whitespace().nth(1) == Some("PASS"))
+        .filter_map(|l| l.split_whitespace().next()?.parse().ok())
+        .collect();
+    assert_eq!(numbers, (1..=total).collect::<Vec<_>>(), "the rows of the recorded output are not numbered 1..N");
+    total
+}
+
+#[test]
+fn the_documented_number_of_hostile_transactions_is_the_recorded_one() {
+    let total = recorded_hostile_transactions();
+    // every attack test sends at least one hostile transaction
+    let attacks = read(&root().join("crates/vesting_tests/tests/attacks.rs"));
+    let tests = attacks.matches("#[tokio::test]").count();
+    assert!(total >= tests, "{total} recorded transactions for {tests} attack tests: the recording undercounts");
+    for doc in ["README.md", "SECURITY.md", "docs/threat-model.md", "CHANGELOG.md"] {
+        let text = read(&root().join(doc));
+        for (at, _) in text.match_indices(" hostile transactions") {
+            let digits: String = text[..at].chars().rev().take_while(char::is_ascii_digit).collect::<Vec<_>>().into_iter().rev().collect();
+            if let Ok(n) = digits.parse::<usize>() {
+                assert_eq!(n, total, "{doc} says {n} hostile transactions; docs/demo-output.txt records {total}");
+            }
+        }
+    }
+    let readme = read(&root().join("README.md"));
+    assert!(
+        readme.contains(&format!("{total} hostile transactions")),
+        "the README must state the recorded number of hostile transactions ({total})"
+    );
+    assert!(
+        read(&root().join("SECURITY.md")).contains(&format!("{total} hostile transactions")),
+        "SECURITY.md must state the recorded number ({total})"
+    );
+}

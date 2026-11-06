@@ -23,214 +23,370 @@ rounding: 10 tokens over 3 seconds vest as [3, 6, 10] (floor, never more than th
 
 == 2. a lifecycle on the in-process bank (crates/vesting_tests/examples/walkthrough.rs) ==
 program   6pFnaNTSjjeR4YQu1t5WPgjrsAsWWZzEn5NoZk6T7qgk
-schedule  A4zrwur4n3S2e1aV2GBx7Un3xpcY35BLhdstYUynxSFi
-vault     Av1CY9gUgkWB1D3uG7MZM3fAcNhDx87DmvLJZPHRNqcf
+schedule  AGxZv1R1acFYJKEUVJtzhZF1CZm3Btr95qoHTAJL9Ku6
+vault     2yZ5ZQ2GhdnPXDxbQ1vkNL6hNtno22BpBUjPj9ssLa1R
 created: vault holds 1000000000 base units
-day 6  claim -> instruction 0: CliffNotReached (31): the cliff has not been reached
+day 6  claim -> instruction 0 [vesting program]: CliffNotReached (31): the cliff has not been reached
 day 7  claim -> paid, beneficiary holds 233333333
 day 15 claim -> paid, beneficiary holds 500000000
 day 20 revoke -> beneficiary holds 666666666, authority holds 333333334, vault holds 0
-day 21 claim after revoke -> instruction 0: ScheduleRevoked (29): the schedule is already revoked
+day 21 claim after revoke -> instruction 0 [vesting program]: ScheduleRevoked (29): the schedule is already revoked
 close -> schedule account exists: false, vault exists: false
 
 == 3. the attack table (crates/vesting_tests/tests/attacks.rs) ==
-  1  PASS  Token-2022: a Token-2022 mint with the classic token program
-       expected: instruction 1: UnsupportedTokenProgram (10)
-       observed: instruction 1: UnsupportedTokenProgram (10): Token-2022 is not supported
-  2  PASS  account list: a missing account on claim
-       expected: instruction 0: NotEnoughAccountKeys
-       observed: instruction 0: NotEnoughAccountKeys
-  3  PASS  account list: an extra account on claim
-       expected: instruction 0: UnexpectedAccounts (23)
-       observed: instruction 0: UnexpectedAccounts (23): more accounts than the instruction takes
-  4  PASS  beneficiary swap: a stranger accepts a proposal made for another key
-       expected: instruction 0: NotPendingBeneficiary (26)
-       observed: instruction 0: NotPendingBeneficiary (26): the signer is not the proposed beneficiary
-  5  PASS  beneficiary swap: propose the current beneficiary
-       expected: instruction 0: InvalidParty (7)
-       observed: instruction 0: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
-  6  PASS  beneficiary swap: the authority proposes a new beneficiary
-       expected: instruction 0: NotBeneficiary (24)
-       observed: instruction 0: NotBeneficiary (24): the signer is not the beneficiary of the schedule
-  7  PASS  beneficiary swap: the creator proposes a new beneficiary
-       expected: instruction 0: NotBeneficiary (24)
-       observed: instruction 0: NotBeneficiary (24): the signer is not the beneficiary of the schedule
-  8  PASS  beneficiary swap: the proposed key claims before accepting
-       expected: instruction 0: NotBeneficiary (24)
-       observed: instruction 0: NotBeneficiary (24): the signer is not the beneficiary of the schedule
-  9  PASS  clock manipulation: a forged clock account in the token program slot
-       expected: instruction 0: WrongTokenProgram (9)
-       observed: instruction 0: WrongTokenProgram (9): the token program account is not the SPL Token program
- 10  PASS  clock manipulation: claim data that is only a timestamp
-       expected: instruction 0: InvalidInstructionData
-       observed: instruction 0: InvalidInstructionData
- 11  PASS  clock manipulation: the clock sysvar passed as an account
-       expected: instruction 0: UnexpectedAccounts (23)
-       observed: instruction 0: UnexpectedAccounts (23): more accounts than the instruction takes
- 12  PASS  clock manipulation: the plain claim at that time is early
-       expected: instruction 0: CliffNotReached (31)
-       observed: instruction 0: CliffNotReached (31): the cliff has not been reached
- 13  PASS  close by non-authority: the beneficiary
-       expected: instruction 0: NotAuthority (25)
-       observed: instruction 0: NotAuthority (25): the signer is not the authority of the schedule
- 14  PASS  closed account: claim on a closed schedule that received lamports
-       expected: instruction 0: WrongAccountOwner (11)
-       observed: instruction 0: WrongAccountOwner (11): an account is owned by the wrong program
- 15  PASS  closed account: claim on a closed schedule
-       expected: instruction 0: WrongAccountOwner (11)
-       observed: instruction 0: WrongAccountOwner (11): an account is owned by the wrong program
- 16  PASS  closing with a remaining balance: after a partial claim
-       expected: instruction 0: NotSettled (33)
-       observed: instruction 0: NotSettled (33): tokens are still owed: the schedule is not settled
- 17  PASS  closing with a remaining balance: vested but unclaimed tokens are still in the vault
-       expected: instruction 0: NotSettled (33)
-       observed: instruction 0: NotSettled (33): tokens are still owed: the schedule is not settled
- 18  PASS  direct withdrawal: set_authority on the vault by the attacker
-       expected: instruction 0: Custom(4)
-       observed: instruction 0: CliffAfterEnd (4): cliff is after end
- 19  PASS  direct withdrawal: the schedule address as an unsigned authority
-       expected: instruction 0: MissingRequiredSignature
-       observed: instruction 0: MissingRequiredSignature
- 20  PASS  double claim: the same claim again in a later transaction
-       expected: instruction 0: NothingToClaim (32)
-       observed: instruction 0: NothingToClaim (32): nothing is claimable right now
- 21  PASS  duplicate accounts: claim with the schedule as the vault
-       expected: instruction 0: DuplicateAccount (21)
-       observed: instruction 0: DuplicateAccount (21): the same account was passed for two roles that must differ
- 22  PASS  duplicate accounts: close with the vault as the authority's account
-       expected: instruction 0: DuplicateAccount (21)
-       observed: instruction 0: DuplicateAccount (21): the same account was passed for two roles that must differ
- 23  PASS  duplicate accounts: initialize with the creator wallet as the funding account
-       expected: instruction 1: DuplicateAccount (21)
-       observed: instruction 1: DuplicateAccount (21): the same account was passed for two roles that must differ
- 24  PASS  duplicate accounts: initialize with the mint as the funding account
-       expected: instruction 1: DuplicateAccount (21)
-       observed: instruction 1: DuplicateAccount (21): the same account was passed for two roles that must differ
- 25  PASS  duplicate accounts: initialize with the schedule as the vault
-       expected: instruction 1: DuplicateAccount (21)
-       observed: instruction 1: DuplicateAccount (21): the same account was passed for two roles that must differ
- 26  PASS  duplicate accounts: revoke with the schedule as the beneficiary's account
-       expected: instruction 0: DuplicateAccount (21)
-       observed: instruction 0: DuplicateAccount (21): the same account was passed for two roles that must differ
- 27  PASS  duplicate accounts: revoke with the vault as the authority's account
-       expected: instruction 0: DuplicateAccount (21)
-       observed: instruction 0: DuplicateAccount (21): the same account was passed for two roles that must differ
- 28  PASS  duplicate accounts: revoke with the vault as the beneficiary's account
-       expected: instruction 0: DuplicateAccount (21)
-       observed: instruction 0: DuplicateAccount (21): the same account was passed for two roles that must differ
- 29  PASS  fake system program: the token program in its place
-       expected: instruction 1: WrongSystemProgram (8)
-       observed: instruction 1: WrongSystemProgram (8): the system program account is not the system program
- 30  PASS  fake token program: a made-up program id (close)
-       expected: instruction 0: WrongTokenProgram (9)
-       observed: instruction 0: WrongTokenProgram (9): the token program account is not the SPL Token program
- 31  PASS  fake token program: a made-up program id (initialize)
-       expected: instruction 1: WrongTokenProgram (9)
-       observed: instruction 1: WrongTokenProgram (9): the token program account is not the SPL Token program
- 32  PASS  fake token program: a made-up program id (revoke)
-       expected: instruction 0: WrongTokenProgram (9)
-       observed: instruction 0: WrongTokenProgram (9): the token program account is not the SPL Token program
- 33  PASS  fake token program: the system program in its place (claim)
-       expected: instruction 0: WrongTokenProgram (9)
-       observed: instruction 0: WrongTokenProgram (9): the token program account is not the SPL Token program
- 34  PASS  frozen account: a frozen funding account
-       expected: instruction 1: TokenAccountFrozen (17)
-       observed: instruction 1: TokenAccountFrozen (17): a token account is frozen
- 35  PASS  frozen account: claim from a frozen vault
-       expected: instruction 0: TokenAccountFrozen (17)
-       observed: instruction 0: TokenAccountFrozen (17): a token account is frozen
- 36  PASS  invalid party: the default key as authority
-       expected: instruction 1: InvalidParty (7)
-       observed: instruction 1: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
- 37  PASS  lamport drain: a system assign of the schedule account
-       expected: instruction 0: MissingRequiredSignature
-       observed: instruction 0: MissingRequiredSignature
- 38  PASS  layout: padded schedule data
-       expected: instruction 0: InvalidAccountData
-       observed: instruction 0: InvalidAccountData
- 39  PASS  malformed data: a revocable flag of 2
-       expected: instruction 1: InvalidInstructionData
-       observed: instruction 1: InvalidInstructionData
- 40  PASS  malformed data: claim with a trailing byte
-       expected: instruction 0: InvalidInstructionData
-       observed: instruction 0: InvalidInstructionData
- 41  PASS  malformed data: initialize one byte short
-       expected: instruction 1: InvalidInstructionData
-       observed: instruction 1: InvalidInstructionData
- 42  PASS  malformed data: initialize with no fields
-       expected: instruction 0: InvalidInstructionData
-       observed: instruction 0: InvalidInstructionData
- 43  PASS  malformed data: revoke with a trailing byte
-       expected: instruction 0: InvalidInstructionData
-       observed: instruction 0: InvalidInstructionData
- 44  PASS  malformed data: unknown tag
-       expected: instruction 0: InvalidInstructionData
-       observed: instruction 0: InvalidInstructionData
- 45  PASS  missing signer: accept_beneficiary
-       expected: instruction 0: MissingRequiredSignature
-       observed: instruction 0: MissingRequiredSignature
- 46  PASS  missing signer: close
-       expected: instruction 0: MissingRequiredSignature
-       observed: instruction 0: MissingRequiredSignature
- 47  PASS  missing signer: propose_beneficiary
-       expected: instruction 0: MissingRequiredSignature
-       observed: instruction 0: MissingRequiredSignature
- 48  PASS  missing signer: revoke
-       expected: instruction 0: MissingRequiredSignature
-       observed: instruction 0: MissingRequiredSignature
- 49  PASS  overflow amounts: a start of i64::MIN
-       expected: instruction 1: NegativeTimestamp (1)
-       observed: instruction 1: NegativeTimestamp (1): start, cliff or end is negative
- 50  PASS  overflow amounts: an end of i64::MAX
-       expected: instruction 1: DurationTooLong (5)
-       observed: instruction 1: DurationTooLong (5): schedule is longer than the maximum duration
- 51  PASS  overflow amounts: one token more than the creator holds
-       expected: instruction 1: InsufficientFunds (19)
-       observed: instruction 1: InsufficientFunds (19): the source token account holds less than the total amount
- 52  PASS  read-only account: claim with the destination read-only
-       expected: instruction 0: AccountNotWritable (22)
-       observed: instruction 0: AccountNotWritable (22): an account that is modified is not writable
- 53  PASS  read-only account: claim with the vault read-only
-       expected: instruction 0: AccountNotWritable (22)
-       observed: instruction 0: AccountNotWritable (22): an account that is modified is not writable
- 54  PASS  read-only account: close with the rent receiver read-only
-       expected: instruction 0: AccountNotWritable (22)
-       observed: instruction 0: AccountNotWritable (22): an account that is modified is not writable
- 55  PASS  revoke after fully vested: there is nothing to take back
-       expected: instruction 0: FullyVested (30)
-       observed: instruction 0: FullyVested (30): everything has vested, there is nothing to revoke
- 56  PASS  revoke by non-authority: the beneficiary
-       expected: instruction 0: NotAuthority (25)
-       observed: instruction 0: NotAuthority (25): the signer is not the authority of the schedule
- 57  PASS  revoke by non-authority: the creator (the authority is another key)
-       expected: instruction 0: NotAuthority (25)
-       observed: instruction 0: NotAuthority (25): the signer is not the authority of the schedule
- 58  PASS  revoke payout: the vested part redirected to a stranger's account
-       expected: instruction 0: WrongTokenAccountOwner (16)
-       observed: instruction 0: WrongTokenAccountOwner (16): a token account has the wrong owner
- 59  PASS  substituted vault: a rogue account owned by the schedule address (initialize)
-       expected: instruction 1: WrongVault (13)
-       observed: instruction 1: WrongVault (13): the vault is not the vault of the schedule
- 60  PASS  uninitialised schedule: claim on a zeroed program-owned account
-       expected: instruction 0: InvalidAccountData
-       observed: instruction 0: InvalidAccountData
- 61  PASS  unsafe vault: claim from a vault that has a close authority
-       expected: instruction 0: UnsafeVaultAuthority (18)
-       observed: instruction 0: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
- 62  PASS  unsafe vault: revoke on a vault that has a close authority
-       expected: instruction 0: UnsafeVaultAuthority (18)
-       observed: instruction 0: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
- 63  PASS  unsafe vault: revoke on a vault that has a delegate
-       expected: instruction 0: UnsafeVaultAuthority (18)
-       observed: instruction 0: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
- 64  PASS  wrong PDA: a random address as the schedule address
-       expected: instruction 1: WrongScheduleAddress (14)
-       observed: instruction 1: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
- 65  PASS  wrong PDA: another id as the schedule address
-       expected: instruction 1: WrongScheduleAddress (14)
-       observed: instruction 1: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
- 66  PASS  wrong mint: revoke with another mint account
-       expected: instruction 0: WrongMint (12)
-       observed: instruction 0: WrongMint (12): the mint account is not the mint of the schedule
+  1  PASS  revival in one transaction: close, send lamports to the address, claim
+       expected: instruction 2 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+       observed: instruction 2 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+  2  PASS  closed account: claim on a closed schedule
+       expected: instruction 0 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+       observed: instruction 0 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+  3  PASS  closed account: claim on a closed schedule that received lamports
+       expected: instruction 0 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+       observed: instruction 0 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+  4  PASS  unsafe vault: claim from a vault that has a delegate
+       expected: instruction 0 [vesting program]: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
+       observed: instruction 0 [vesting program]: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
+  5  PASS  unsafe vault: revoke on a vault that has a delegate
+       expected: instruction 0 [vesting program]: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
+       observed: instruction 0 [vesting program]: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
+  6  PASS  unsafe vault: claim from a vault that has a close authority
+       expected: instruction 0 [vesting program]: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
+       observed: instruction 0 [vesting program]: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
+  7  PASS  unsafe vault: revoke on a vault that has a close authority
+       expected: instruction 0 [vesting program]: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
+       observed: instruction 0 [vesting program]: UnsafeVaultAuthority (18): the vault has a delegate or a close authority
+  8  PASS  uninitialised vault: the token account state is Uninitialized
+       expected: instruction 0 [vesting program]: UninitializedAccount
+       observed: instruction 0 [vesting program]: UninitializedAccount
+  9  PASS  beneficiary swap: accept while no change is pending
+       expected: instruction 0 [vesting program]: NoPendingBeneficiary (27): no beneficiary change is pending
+       observed: instruction 0 [vesting program]: NoPendingBeneficiary (27): no beneficiary change is pending
+ 10  PASS  beneficiary swap: a stranger accepts a proposal made for another key
+       expected: instruction 0 [vesting program]: NotPendingBeneficiary (26): the signer is not the proposed beneficiary
+       observed: instruction 0 [vesting program]: NotPendingBeneficiary (26): the signer is not the proposed beneficiary
+ 11  PASS  beneficiary swap: the proposed key claims before accepting
+       expected: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+       observed: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+ 12  PASS  beneficiary swap: a stranger proposes a new beneficiary
+       expected: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+       observed: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+ 13  PASS  beneficiary swap: the authority proposes a new beneficiary
+       expected: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+       observed: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+ 14  PASS  beneficiary swap: the creator proposes a new beneficiary
+       expected: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+       observed: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+ 15  PASS  beneficiary swap: propose the default key
+       expected: instruction 0 [vesting program]: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
+       observed: instruction 0 [vesting program]: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
+ 16  PASS  beneficiary swap: propose the current beneficiary
+       expected: instruction 0 [vesting program]: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
+       observed: instruction 0 [vesting program]: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
+ 17  PASS  claim after revocation: nothing more is owed
+       expected: instruction 0 [vesting program]: ScheduleRevoked (29): the schedule is already revoked
+       observed: instruction 0 [vesting program]: ScheduleRevoked (29): the schedule is already revoked
+ 18  PASS  claim before the cliff: one second early
+       expected: instruction 0 [vesting program]: CliffNotReached (31): the cliff has not been reached
+       observed: instruction 0 [vesting program]: CliffNotReached (31): the cliff has not been reached
+ 19  PASS  claim before the start: the schedule has not begun
+       expected: instruction 0 [vesting program]: CliffNotReached (31): the cliff has not been reached
+       observed: instruction 0 [vesting program]: CliffNotReached (31): the cliff has not been reached
+ 20  PASS  clock manipulation: a forged clock account appended to the claim
+       expected: instruction 0 [vesting program]: UnexpectedAccounts (23): more accounts than the instruction takes
+       observed: instruction 0 [vesting program]: UnexpectedAccounts (23): more accounts than the instruction takes
+ 21  PASS  clock manipulation: a forged clock account in the token program slot
+       expected: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+       observed: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+ 22  PASS  clock manipulation: the clock sysvar passed as an account
+       expected: instruction 0 [vesting program]: UnexpectedAccounts (23): more accounts than the instruction takes
+       observed: instruction 0 [vesting program]: UnexpectedAccounts (23): more accounts than the instruction takes
+ 23  PASS  clock manipulation: a timestamp appended to the claim data
+       expected: instruction 0 [vesting program]: InvalidInstructionData
+       observed: instruction 0 [vesting program]: InvalidInstructionData
+ 24  PASS  clock manipulation: claim data that is only a timestamp
+       expected: instruction 0 [vesting program]: InvalidInstructionData
+       observed: instruction 0 [vesting program]: InvalidInstructionData
+ 25  PASS  clock manipulation: the plain claim at that time is early
+       expected: instruction 0 [vesting program]: CliffNotReached (31): the cliff has not been reached
+       observed: instruction 0 [vesting program]: CliffNotReached (31): the cliff has not been reached
+ 26  PASS  close by non-authority: a stranger
+       expected: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+       observed: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+ 27  PASS  close by non-authority: the beneficiary
+       expected: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+       observed: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+ 28  PASS  closing with a remaining balance: halfway through the schedule
+       expected: instruction 0 [vesting program]: NotSettled (33): tokens are still owed: the schedule is not settled
+       observed: instruction 0 [vesting program]: NotSettled (33): tokens are still owed: the schedule is not settled
+ 29  PASS  closing with a remaining balance: after a partial claim
+       expected: instruction 0 [vesting program]: NotSettled (33): tokens are still owed: the schedule is not settled
+       observed: instruction 0 [vesting program]: NotSettled (33): tokens are still owed: the schedule is not settled
+ 30  PASS  closing with a remaining balance: vested but unclaimed tokens are still in the vault
+       expected: instruction 0 [vesting program]: NotSettled (33): tokens are still owed: the schedule is not settled
+       observed: instruction 0 [vesting program]: NotSettled (33): tokens are still owed: the schedule is not settled
+ 31  PASS  arithmetic: claimed amount above the total in the stored state
+       expected: instruction 0 [vesting program]: CorruptSchedule (35): the stored schedule is inconsistent
+       observed: instruction 0 [vesting program]: CorruptSchedule (35): the stored schedule is inconsistent
+ 32  PASS  direct withdrawal: the attacker signs as the vault's owner
+       expected: instruction 0 [SPL Token program]: OwnerMismatch (4)
+       observed: instruction 0 [SPL Token program]: OwnerMismatch (4)
+ 33  PASS  direct withdrawal: the schedule address as an unsigned authority
+       expected: instruction 0 [SPL Token program]: MissingRequiredSignature
+       observed: instruction 0 [SPL Token program]: MissingRequiredSignature
+ 34  PASS  direct withdrawal: set_authority on the vault by the attacker
+       expected: instruction 0 [SPL Token program]: OwnerMismatch (4)
+       observed: instruction 0 [SPL Token program]: OwnerMismatch (4)
+ 35  PASS  double claim: the same claim twice in one transaction
+       expected: instruction 1 [vesting program]: NothingToClaim (32): nothing is claimable right now
+       observed: instruction 1 [vesting program]: NothingToClaim (32): nothing is claimable right now
+ 36  PASS  double claim: the same claim again in a later transaction
+       expected: instruction 0 [vesting program]: NothingToClaim (32): nothing is claimable right now
+       observed: instruction 0 [vesting program]: NothingToClaim (32): nothing is claimable right now
+ 37  PASS  duplicate accounts: claim with the vault as the destination
+       expected: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 38  PASS  duplicate accounts: claim with the schedule as the vault
+       expected: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 39  PASS  duplicate accounts: revoke with the vault as the beneficiary's account
+       expected: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 40  PASS  duplicate accounts: revoke with the vault as the authority's account
+       expected: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 41  PASS  duplicate accounts: revoke with the schedule as the beneficiary's account
+       expected: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 42  PASS  duplicate accounts: close with the vault as the authority's account
+       expected: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 0 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 43  PASS  duplicate accounts: initialize with the vault as the funding account
+       expected: instruction 1 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 1 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 44  PASS  duplicate accounts: initialize with the schedule as the vault
+       expected: instruction 1 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 1 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 45  PASS  duplicate accounts: initialize with the creator wallet as the funding account
+       expected: instruction 1 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 1 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 46  PASS  duplicate accounts: initialize with the mint as the funding account
+       expected: instruction 1 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+       observed: instruction 1 [vesting program]: DuplicateAccount (21): the same account was passed for two roles that must differ
+ 47  PASS  fake system program: a made-up program id
+       expected: instruction 1 [vesting program]: WrongSystemProgram (8): the system program account is not the system program
+       observed: instruction 1 [vesting program]: WrongSystemProgram (8): the system program account is not the system program
+ 48  PASS  fake system program: the token program in its place
+       expected: instruction 1 [vesting program]: WrongSystemProgram (8): the system program account is not the system program
+       observed: instruction 1 [vesting program]: WrongSystemProgram (8): the system program account is not the system program
+ 49  PASS  fake token program: a made-up program id (claim)
+       expected: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+       observed: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+ 50  PASS  fake token program: the system program in its place (claim)
+       expected: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+       observed: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+ 51  PASS  fake token program: a made-up program id (revoke)
+       expected: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+       observed: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+ 52  PASS  fake token program: a made-up program id (close)
+       expected: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+       observed: instruction 0 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+ 53  PASS  fake token program: a made-up program id (initialize)
+       expected: instruction 1 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+       observed: instruction 1 [vesting program]: WrongTokenProgram (9): the token program account is not the SPL Token program
+ 54  PASS  frozen account: claim into a frozen destination
+       expected: instruction 0 [vesting program]: TokenAccountFrozen (17): a token account is frozen
+       observed: instruction 0 [vesting program]: TokenAccountFrozen (17): a token account is frozen
+ 55  PASS  frozen account: claim from a frozen vault
+       expected: instruction 0 [vesting program]: TokenAccountFrozen (17): a token account is frozen
+       observed: instruction 0 [vesting program]: TokenAccountFrozen (17): a token account is frozen
+ 56  PASS  frozen account: a frozen funding account
+       expected: instruction 1 [vesting program]: TokenAccountFrozen (17): a token account is frozen
+       observed: instruction 1 [vesting program]: TokenAccountFrozen (17): a token account is frozen
+ 57  PASS  funding: the creator names another owner's token account as the source
+       expected: instruction 1 [vesting program]: WrongTokenAccountOwner (16): a token account has the wrong owner
+       observed: instruction 1 [vesting program]: WrongTokenAccountOwner (16): a token account has the wrong owner
+ 58  PASS  invalid party: the default key as beneficiary
+       expected: instruction 1 [vesting program]: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
+       observed: instruction 1 [vesting program]: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
+ 59  PASS  invalid party: the default key as authority
+       expected: instruction 1 [vesting program]: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
+       observed: instruction 1 [vesting program]: InvalidParty (7): a beneficiary or authority key is the default (all zero) key or unchanged
+ 60  PASS  lamport drain: a system transfer out of the schedule account
+       expected: instruction 0 [system program]: MissingRequiredSignature
+       observed: instruction 0 [system program]: MissingRequiredSignature
+ 61  PASS  lamport drain: a system assign of the schedule account
+       expected: instruction 0 [system program]: MissingRequiredSignature
+       observed: instruction 0 [system program]: MissingRequiredSignature
+ 62  PASS  malformed data: empty data
+       expected: instruction 0 [vesting program]: InvalidInstructionData
+       observed: instruction 0 [vesting program]: InvalidInstructionData
+ 63  PASS  malformed data: unknown tag
+       expected: instruction 0 [vesting program]: InvalidInstructionData
+       observed: instruction 0 [vesting program]: InvalidInstructionData
+ 64  PASS  malformed data: claim with a trailing byte
+       expected: instruction 0 [vesting program]: InvalidInstructionData
+       observed: instruction 0 [vesting program]: InvalidInstructionData
+ 65  PASS  malformed data: revoke with a trailing byte
+       expected: instruction 0 [vesting program]: InvalidInstructionData
+       observed: instruction 0 [vesting program]: InvalidInstructionData
+ 66  PASS  malformed data: initialize with no fields
+       expected: instruction 0 [vesting program]: InvalidInstructionData
+       observed: instruction 0 [vesting program]: InvalidInstructionData
+ 67  PASS  malformed data: a revocable flag of 2
+       expected: instruction 1 [vesting program]: InvalidInstructionData
+       observed: instruction 1 [vesting program]: InvalidInstructionData
+ 68  PASS  malformed data: initialize one byte short
+       expected: instruction 1 [vesting program]: InvalidInstructionData
+       observed: instruction 1 [vesting program]: InvalidInstructionData
+ 69  PASS  account list: an extra account on claim
+       expected: instruction 0 [vesting program]: UnexpectedAccounts (23): more accounts than the instruction takes
+       observed: instruction 0 [vesting program]: UnexpectedAccounts (23): more accounts than the instruction takes
+ 70  PASS  account list: a missing account on claim
+       expected: instruction 0 [vesting program]: NotEnoughAccountKeys
+       observed: instruction 0 [vesting program]: NotEnoughAccountKeys
+ 71  PASS  missing signer: claim
+       expected: instruction 0 [vesting program]: MissingRequiredSignature
+       observed: instruction 0 [vesting program]: MissingRequiredSignature
+ 72  PASS  missing signer: revoke
+       expected: instruction 0 [vesting program]: MissingRequiredSignature
+       observed: instruction 0 [vesting program]: MissingRequiredSignature
+ 73  PASS  missing signer: close
+       expected: instruction 0 [vesting program]: MissingRequiredSignature
+       observed: instruction 0 [vesting program]: MissingRequiredSignature
+ 74  PASS  missing signer: propose_beneficiary
+       expected: instruction 0 [vesting program]: MissingRequiredSignature
+       observed: instruction 0 [vesting program]: MissingRequiredSignature
+ 75  PASS  missing signer: accept_beneficiary
+       expected: instruction 0 [vesting program]: MissingRequiredSignature
+       observed: instruction 0 [vesting program]: MissingRequiredSignature
+ 76  PASS  missing signer: initialize_schedule without the creator's signature
+       expected: instruction 0 [vesting program]: MissingRequiredSignature
+       observed: instruction 0 [vesting program]: MissingRequiredSignature
+ 77  PASS  overflow amounts: a total of u64::MAX that the creator does not hold
+       expected: instruction 1 [vesting program]: InsufficientFunds (19): the source token account holds less than the total amount
+       observed: instruction 1 [vesting program]: InsufficientFunds (19): the source token account holds less than the total amount
+ 78  PASS  overflow amounts: one token more than the creator holds
+       expected: instruction 1 [vesting program]: InsufficientFunds (19): the source token account holds less than the total amount
+       observed: instruction 1 [vesting program]: InsufficientFunds (19): the source token account holds less than the total amount
+ 79  PASS  overflow amounts: a start of i64::MIN
+       expected: instruction 1 [vesting program]: NegativeTimestamp (1): start, cliff or end is negative
+       observed: instruction 1 [vesting program]: NegativeTimestamp (1): start, cliff or end is negative
+ 80  PASS  overflow amounts: an end of i64::MAX
+       expected: instruction 1 [vesting program]: DurationTooLong (5): schedule is longer than the maximum duration
+       observed: instruction 1 [vesting program]: DurationTooLong (5): schedule is longer than the maximum duration
+ 81  PASS  read-only account: claim with the schedule read-only
+       expected: instruction 0 [vesting program]: AccountNotWritable (22): an account that is modified is not writable
+       observed: instruction 0 [vesting program]: AccountNotWritable (22): an account that is modified is not writable
+ 82  PASS  read-only account: claim with the vault read-only
+       expected: instruction 0 [vesting program]: AccountNotWritable (22): an account that is modified is not writable
+       observed: instruction 0 [vesting program]: AccountNotWritable (22): an account that is modified is not writable
+ 83  PASS  read-only account: claim with the destination read-only
+       expected: instruction 0 [vesting program]: AccountNotWritable (22): an account that is modified is not writable
+       observed: instruction 0 [vesting program]: AccountNotWritable (22): an account that is modified is not writable
+ 84  PASS  read-only account: close with the rent receiver read-only
+       expected: instruction 0 [vesting program]: AccountNotWritable (22): an account that is modified is not writable
+       observed: instruction 0 [vesting program]: AccountNotWritable (22): an account that is modified is not writable
+ 85  PASS  reinitialisation: initialize on a live schedule address
+       expected: instruction 1 [vesting program]: AccountAlreadyInitialized
+       observed: instruction 1 [vesting program]: AccountAlreadyInitialized
+ 86  PASS  reinitialisation: initialize over a program-owned zeroed account
+       expected: instruction 1 [vesting program]: AccountAlreadyInitialized
+       observed: instruction 1 [vesting program]: AccountAlreadyInitialized
+ 87  PASS  uninitialised schedule: claim on a zeroed program-owned account
+       expected: instruction 0 [vesting program]: InvalidAccountData
+       observed: instruction 0 [vesting program]: InvalidAccountData
+ 88  PASS  revoke non-revocable: the authority tries anyway
+       expected: instruction 0 [vesting program]: NotRevocable (28): the schedule is not revocable
+       observed: instruction 0 [vesting program]: NotRevocable (28): the schedule is not revocable
+ 89  PASS  revoke by non-authority: a stranger
+       expected: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+       observed: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+ 90  PASS  revoke by non-authority: the beneficiary
+       expected: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+       observed: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+ 91  PASS  revoke by non-authority: the creator (the authority is another key)
+       expected: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+       observed: instruction 0 [vesting program]: NotAuthority (25): the signer is not the authority of the schedule
+ 92  PASS  revoke payout: the remainder redirected to a stranger's account
+       expected: instruction 0 [vesting program]: WrongTokenAccountOwner (16): a token account has the wrong owner
+       observed: instruction 0 [vesting program]: WrongTokenAccountOwner (16): a token account has the wrong owner
+ 93  PASS  revoke payout: the vested part redirected to a stranger's account
+       expected: instruction 0 [vesting program]: WrongTokenAccountOwner (16): a token account has the wrong owner
+       observed: instruction 0 [vesting program]: WrongTokenAccountOwner (16): a token account has the wrong owner
+ 94  PASS  revoke twice: the second revocation
+       expected: instruction 0 [vesting program]: ScheduleRevoked (29): the schedule is already revoked
+       observed: instruction 0 [vesting program]: ScheduleRevoked (29): the schedule is already revoked
+ 95  PASS  revoke after fully vested: there is nothing to take back
+       expected: instruction 0 [vesting program]: FullyVested (30): everything has vested, there is nothing to revoke
+       observed: instruction 0 [vesting program]: FullyVested (30): everything has vested, there is nothing to revoke
+ 96  PASS  substituted vault: a rogue account owned by the schedule address (claim)
+       expected: instruction 0 [vesting program]: WrongVault (13): the vault is not the vault of the schedule
+       observed: instruction 0 [vesting program]: WrongVault (13): the vault is not the vault of the schedule
+ 97  PASS  substituted vault: a rogue account owned by the schedule address (initialize)
+       expected: instruction 1 [vesting program]: WrongVault (13): the vault is not the vault of the schedule
+       observed: instruction 1 [vesting program]: WrongVault (13): the vault is not the vault of the schedule
+ 98  PASS  substituted vault: another token account in the vault slot
+       expected: instruction 0 [vesting program]: WrongVault (13): the vault is not the vault of the schedule
+       observed: instruction 0 [vesting program]: WrongVault (13): the vault is not the vault of the schedule
+ 99  PASS  account substitution: the vault of another schedule
+       expected: instruction 0 [vesting program]: WrongVault (13): the vault is not the vault of the schedule
+       observed: instruction 0 [vesting program]: WrongVault (13): the vault is not the vault of the schedule
+100  PASS  Token-2022: the Token-2022 program in the token program slot
+       expected: instruction 1 [vesting program]: UnsupportedTokenProgram (10): Token-2022 is not supported
+       observed: instruction 1 [vesting program]: UnsupportedTokenProgram (10): Token-2022 is not supported
+101  PASS  Token-2022: a Token-2022 mint with the classic token program
+       expected: instruction 1 [vesting program]: UnsupportedTokenProgram (10): Token-2022 is not supported
+       observed: instruction 1 [vesting program]: UnsupportedTokenProgram (10): Token-2022 is not supported
+102  PASS  layout: truncated schedule data
+       expected: instruction 0 [vesting program]: InvalidAccountData
+       observed: instruction 0 [vesting program]: InvalidAccountData
+103  PASS  layout: padded schedule data
+       expected: instruction 0 [vesting program]: InvalidAccountData
+       observed: instruction 0 [vesting program]: InvalidAccountData
+104  PASS  wrong bump: the stored bump is not the canonical bump
+       expected: instruction 0 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+       observed: instruction 0 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+105  PASS  wrong mint: claim into the beneficiary's account of another mint
+       expected: instruction 0 [vesting program]: WrongTokenAccountMint (15): a token account holds a different mint
+       observed: instruction 0 [vesting program]: WrongTokenAccountMint (15): a token account holds a different mint
+106  PASS  wrong mint: claim with another mint account
+       expected: instruction 0 [vesting program]: WrongMint (12): the mint account is not the mint of the schedule
+       observed: instruction 0 [vesting program]: WrongMint (12): the mint account is not the mint of the schedule
+107  PASS  wrong mint: revoke with another mint account
+       expected: instruction 0 [vesting program]: WrongMint (12): the mint account is not the mint of the schedule
+       observed: instruction 0 [vesting program]: WrongMint (12): the mint account is not the mint of the schedule
+108  PASS  wrong mint: the funding account holds another mint
+       expected: instruction 1 [vesting program]: WrongTokenAccountMint (15): a token account holds a different mint
+       observed: instruction 1 [vesting program]: WrongTokenAccountMint (15): a token account holds a different mint
+109  PASS  wrong owner: the mint is not owned by the token program
+       expected: instruction 1 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+       observed: instruction 1 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+110  PASS  wrong owner: the schedule account belongs to another program
+       expected: instruction 0 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+       observed: instruction 0 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+111  PASS  wrong owner: the vault is not owned by the token program
+       expected: instruction 0 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+       observed: instruction 0 [vesting program]: WrongAccountOwner (11): an account is owned by the wrong program
+112  PASS  wrong PDA: a valid address with a non-canonical bump as the schedule
+       expected: instruction 1 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+       observed: instruction 1 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+113  PASS  wrong PDA: another creator as the schedule address
+       expected: instruction 1 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+       observed: instruction 1 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+114  PASS  wrong PDA: another id as the schedule address
+       expected: instruction 1 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+       observed: instruction 1 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+115  PASS  wrong PDA: a random address as the schedule address
+       expected: instruction 1 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+       observed: instruction 1 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+116  PASS  wrong PDA: a forged schedule copy at a non-canonical bump address
+       expected: instruction 0 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+       observed: instruction 0 [vesting program]: WrongScheduleAddress (14): the schedule account is not the canonical program derived address
+117  PASS  wrong destination: claim into a token account owned by someone else
+       expected: instruction 0 [vesting program]: WrongTokenAccountOwner (16): a token account has the wrong owner
+       observed: instruction 0 [vesting program]: WrongTokenAccountOwner (16): a token account has the wrong owner
+118  PASS  wrong signer: a stranger claims as if it were the beneficiary
+       expected: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
+       observed: instruction 0 [vesting program]: NotBeneficiary (24): the signer is not the beneficiary of the schedule
 
-66 hostile transactions, 66 rejected exactly as expected, 0 not
+118 hostile transactions, 118 rejected exactly as expected, 0 not
