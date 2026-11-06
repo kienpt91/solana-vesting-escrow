@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  test:
+    # Every cargo command runs in the official Rust image pinned by digest (see scripts/rs.sh): as the calling user, with
+    # all capabilities dropped, and with network none except for `rustup component add` and `cargo fetch --locked`.
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      # pinned to a full commit SHA
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain components of the pinned image
+        run: sh scripts/rs.sh --net 'rustup component add clippy rustfmt'
+      - name: Fetch the locked crates
+        run: sh scripts/rs.sh --net 'cargo fetch --locked'
+      - name: Format
+        run: sh scripts/rs.sh 'cargo fmt --all -- --check'
+      - name: Clippy, warnings are errors
+        run: sh scripts/rs.sh 'cargo clippy --workspace --all-targets --locked --offline -- -D warnings'
+      - name: Tests, layer by layer
+        run: sh scripts/rs.sh 'sh scripts/test-layers.sh'
+      - name: Build the program (host build: the SBF toolchain is not part of this repository's tooling)
+        run: sh scripts/rs.sh 'cargo build -p vesting_escrow --release --locked --offline && cargo build -p vesting_escrow --release --features no-entrypoint --locked --offline'
+
+  coverage:
+    # Line coverage per crate with rustc's own instrumentation; the numbers are printed, not gated.
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sh scripts/rs.sh --net 'rustup component add clippy rustfmt llvm-tools-preview'
+      - run: sh scripts/rs.sh --net 'cargo fetch --locked'
+      - run: sh scripts/rs.sh 'sh scripts/coverage.sh'
+
+  release-scripts:
+    # The shell tests of the release scripts; they need only git and a POSIX shell.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sh scripts/test-release.sh
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      # full history so the whole history can be scanned
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan the tree
+        run: sh scripts/secret-scan.sh --tree
+      - name: Scan the history
+        run: sh scripts/secret-scan.sh --history
+      - name: Check the tree for tool signatures and personal paths
+        run: sh scripts/hygiene.sh --tree
+      - name: Check every commit message and identity
+        run: sh scripts/hygiene.sh --history
+
+  crate-age:
+    # Every locked crate must have been published at least seven days ago.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: node scripts/check-crates-age.mjs . 7
