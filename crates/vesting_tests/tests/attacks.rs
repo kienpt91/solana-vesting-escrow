@@ -457,7 +457,7 @@ async fn reinitialisation_of_a_live_schedule() {
 #[tokio::test]
 async fn reinitialisation_of_a_program_owned_account_with_zeroed_data() {
     let mut s = Scenario::prepare(Setup::default()).await;
-    let rent = s.env.ctx.banks_client.get_rent().await.unwrap();
+    let rent = s.env.rent().await;
     let zeroed = Account {
         lamports: rent.minimum_balance(client::SCHEDULE_ACCOUNT_SIZE),
         data: vec![0; client::SCHEDULE_ACCOUNT_SIZE],
@@ -902,7 +902,7 @@ async fn clock_manipulation_through_a_forged_clock_account() {
     let b = s.beneficiary.insecure_clone();
 
     // an account that holds a Clock far in the future, owned by the sysvar program, at an address of the attacker's choosing
-    let mut clock: Clock = s.env.ctx.banks_client.get_sysvar().await.unwrap();
+    let mut clock: Clock = s.env.sysvar().await;
     clock.unix_timestamp = T0 + 10 * DAY;
     let forged = Pubkey::new_unique();
     let account = Account::new_data(1_000_000, &clock, &solana_sdk::sysvar::id()).unwrap();

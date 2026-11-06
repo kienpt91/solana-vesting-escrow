@@ -7,17 +7,21 @@
 //! sysvars and CPI privilege checks. What does not run: the vesting program as SBF bytecode (compute units, stack and
 //! heap limits are not enforced on it). `README.md` spells this out.
 
-use solana_program::{program_pack::Pack, pubkey::Pubkey};
+use solana_program::{program_pack::Pack, pubkey::Pubkey, sysvar::Sysvar};
 use solana_program_test::{processor, BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
-    account::{Account, AccountSharedData},
+    account::{from_account, Account, AccountSharedData},
     clock::Clock,
+    commitment_config::CommitmentLevel,
+    hash::Hash,
     instruction::{AccountMeta, Instruction, InstructionError},
+    rent::Rent,
     signature::{Keypair, Signer},
     system_instruction,
     transaction::{Transaction, TransactionError},
 };
 use spl_token::state::{Account as TokenAccountState, AccountState, Mint};
+use std::time::{Duration, Instant, SystemTime};
 use vesting_client::{self as client, InitializeParams, ScheduleAccount, VestingError};
 
 pub use solana_program;
@@ -32,6 +36,8 @@ pub const T0: i64 = 1_700_000_000;
 /// One hour, one day, in seconds.
 pub const HOUR: i64 = 3_600;
 pub const DAY: i64 = 86_400;
+/// How long a request to the in-process bank may take before a test gives up: far above its normal milliseconds.
+const REQUEST_DEADLINE: Duration = Duration::from_secs(120);
 /// Decimals of the test mints.
 pub const DECIMALS: u8 = 6;
 
@@ -167,41 +173,85 @@ impl Env {
         env
     }
 
+    /// A request context with a long deadline. The in-process bank answers through a channel whose default deadline is ten
+    /// seconds per request, and on a loaded machine (a shared host, a container that is starved of CPU) a request can take
+    /// longer: the test would then fail with "the request exceeded its deadline" although the program did the right thing.
+    fn patient() -> tarpc::context::Context {
+        let mut ctx = tarpc::context::current();
+        ctx.deadline = SystemTime::now() + REQUEST_DEADLINE;
+        ctx
+    }
+
+    /// A blockhash that no earlier transaction of this bank used. Asking for one has no effect on the bank, so it is retried.
+    async fn fresh_blockhash(&mut self) -> Result<Hash, Failure> {
+        let started = Instant::now();
+        loop {
+            match self.ctx.get_new_latest_blockhash().await {
+                Ok(hash) => return Ok(hash),
+                Err(e) if started.elapsed() > REQUEST_DEADLINE => return Err(Failure::Client(e.to_string())),
+                Err(_) => continue,
+            }
+        }
+    }
+
+    /// Sends a signed transaction and waits for its result with a long deadline. It is not retried: a transaction that timed
+    /// out may still have been executed.
+    async fn submit(&mut self, tx: Transaction, instructions: &[Instruction]) -> Result<(), Failure> {
+        let result =
+            self.ctx.banks_client.process_transaction_with_commitment_and_context(Self::patient(), tx, CommitmentLevel::default()).await;
+        match result {
+            Ok(Some(Ok(()))) => Ok(()),
+            Ok(Some(Err(e))) => Err(Failure::from_bank(BanksClientError::TransactionError(e), instructions)),
+            Ok(None) => Err(Failure::Client("invalid blockhash or fee-payer".to_string())),
+            Err(e) => Err(Failure::from_bank(e, instructions)),
+        }
+    }
+
+    /// A sysvar as the bank holds it now.
+    pub async fn sysvar<T: Sysvar>(&mut self) -> T {
+        let account = self.account(&T::id()).await.expect("the sysvar account exists");
+        from_account::<T, _>(&account).expect("the sysvar decodes")
+    }
+
+    pub async fn rent(&mut self) -> Rent {
+        self.sysvar::<Rent>().await
+    }
+
     pub fn program_id(&self) -> Pubkey {
         vesting_escrow::ID
     }
 
     /// Sets the clock sysvar's Unix time. This is the only way time moves in a test.
     pub async fn set_time(&mut self, unix_timestamp: i64) {
-        let mut clock: Clock = self.ctx.banks_client.get_sysvar().await.expect("clock sysvar");
+        let mut clock: Clock = self.sysvar().await;
         clock.unix_timestamp = unix_timestamp;
         self.ctx.set_sysvar(&clock);
     }
 
     /// The clock sysvar's current Unix time.
     pub async fn now(&mut self) -> i64 {
-        let clock: Clock = self.ctx.banks_client.get_sysvar().await.expect("clock sysvar");
+        let clock: Clock = self.sysvar().await;
         clock.unix_timestamp
     }
 
     /// Sends one transaction with the payer as fee payer plus `signers`. Every call uses a fresh blockhash, so
     /// sending the same instructions twice is two transactions, not a replay.
     pub async fn send(&mut self, instructions: &[Instruction], signers: &[&Keypair]) -> Result<(), Failure> {
-        let blockhash = self.ctx.get_new_latest_blockhash().await.map_err(|e| Failure::Client(e.to_string()))?;
+        let blockhash = self.fresh_blockhash().await?;
         let mut all: Vec<&Keypair> = vec![&self.payer];
         all.extend_from_slice(signers);
         let tx = Transaction::new_signed_with_payer(instructions, Some(&self.payer.pubkey()), &all, blockhash);
-        self.ctx.banks_client.process_transaction(tx).await.map_err(|e| Failure::from_bank(e, instructions))
+        self.submit(tx, instructions).await
     }
 
     /// Sends a transaction that is signed by exactly the given keypairs, the first of which pays the fee. Used by
     /// attacks that must control the signer set.
     pub async fn send_signed_by(&mut self, instructions: &[Instruction], fee_payer: &Keypair, signers: &[&Keypair]) -> Result<(), Failure> {
-        let blockhash = self.ctx.get_new_latest_blockhash().await.map_err(|e| Failure::Client(e.to_string()))?;
+        let blockhash = self.fresh_blockhash().await?;
         let mut all: Vec<&Keypair> = vec![fee_payer];
         all.extend_from_slice(signers);
         let tx = Transaction::new_signed_with_payer(instructions, Some(&fee_payer.pubkey()), &all, blockhash);
-        self.ctx.banks_client.process_transaction(tx).await.map_err(|e| Failure::from_bank(e, instructions))
+        self.submit(tx, instructions).await
     }
 
     /// Sends the instructions and panics unless they succeed.
@@ -218,7 +268,16 @@ impl Env {
     }
 
     pub async fn account(&mut self, address: &Pubkey) -> Option<Account> {
-        self.ctx.banks_client.get_account(*address).await.expect("rpc")
+        let started = Instant::now();
+        loop {
+            // reading has no effect on the bank, so a request that timed out is simply asked again
+            match self.ctx.banks_client.get_account_with_commitment_and_context(Self::patient(), *address, CommitmentLevel::default()).await
+            {
+                Ok(account) => return account,
+                Err(e) if started.elapsed() > REQUEST_DEADLINE => panic!("the bank did not answer: {e}"),
+                Err(_) => continue,
+            }
+        }
     }
 
     pub async fn lamports(&mut self, address: &Pubkey) -> u64 {
@@ -233,7 +292,7 @@ impl Env {
     /// Creates a classic SPL Token mint whose authority is the payer.
     pub async fn create_mint(&mut self, decimals: u8, freeze_authority: Option<&Pubkey>) -> Pubkey {
         let mint = Keypair::new();
-        let rent = self.ctx.banks_client.get_rent().await.expect("rent");
+        let rent = self.rent().await;
         let ixs = [
             system_instruction::create_account(
                 &self.payer.pubkey(),
@@ -252,7 +311,7 @@ impl Env {
     /// Creates a Token-2022 mint without extensions, with the real Token-2022 program.
     pub async fn create_token_2022_mint(&mut self, decimals: u8) -> Pubkey {
         let mint = Keypair::new();
-        let rent = self.ctx.banks_client.get_rent().await.expect("rent");
+        let rent = self.rent().await;
         let create = system_instruction::create_account(
             &self.payer.pubkey(),
             &mint.pubkey(),
@@ -280,7 +339,7 @@ impl Env {
     /// attacker can do this for any owner, including a schedule address.
     pub async fn create_loose_token_account(&mut self, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
         let account = Keypair::new();
-        let rent = self.ctx.banks_client.get_rent().await.expect("rent");
+        let rent = self.rent().await;
         let ixs = [
             system_instruction::create_account(
                 &self.payer.pubkey(),

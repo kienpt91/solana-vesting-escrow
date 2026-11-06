@@ -17,6 +17,8 @@ solana-program = "=1.18.26"
 solana-program-test = "=1.18.26"
 solana-sdk = "=1.18.26"
 spl-token = { version = "=4.0.0", features = ["no-entrypoint"] }
+# the request context of the in-process bank (a longer deadline, see Env::patient); already in the lock file through solana-program-test
+tarpc = { version = "=0.29.0", default-features = false }
 tokio = { version = "=1.51.6", features = ["macros", "rt"] }
 
 [lints.rust]

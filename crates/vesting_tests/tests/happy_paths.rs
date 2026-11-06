@@ -39,7 +39,7 @@ async fn initialize_funds_the_vault_and_records_the_schedule() {
     let account = s.env.account(&s.schedule).await.unwrap();
     assert_eq!(account.owner, s.program_id());
     assert_eq!(account.data.len(), client::SCHEDULE_ACCOUNT_SIZE);
-    let rent = s.env.ctx.banks_client.get_rent().await.unwrap();
+    let rent = s.env.rent().await;
     assert!(rent.is_exempt(account.lamports, account.data.len()));
 
     // the vault is a token account owned by the schedule address
@@ -270,21 +270,21 @@ async fn lamports_sent_to_the_schedule_address_first_do_not_block_creation() {
     let mut s = Scenario::prepare(linear()).await;
     // griefing attempt: lamports on the address make `create_account` fail for everyone (the runtime only accepts
     // a first deposit that is rent exempt for an empty account)
-    let rent = s.env.ctx.banks_client.get_rent().await.unwrap();
+    let rent = s.env.rent().await;
     let dust = rent.minimum_balance(0);
     s.env.airdrop(&s.schedule, dust).await;
     assert_eq!(s.env.lamports(&s.schedule).await, dust);
     s.initialize().await.unwrap();
     let account = s.env.account(&s.schedule).await.unwrap();
     assert_eq!(account.owner, s.program_id());
-    let rent = s.env.ctx.banks_client.get_rent().await.unwrap();
+    let rent = s.env.rent().await;
     assert!(rent.is_exempt(account.lamports, account.data.len()));
 }
 
 #[tokio::test]
 async fn an_oversized_donation_to_the_schedule_address_is_kept_not_refunded() {
     let mut s = Scenario::prepare(linear()).await;
-    let rent = s.env.ctx.banks_client.get_rent().await.unwrap();
+    let rent = s.env.rent().await;
     let donation = rent.minimum_balance(client::SCHEDULE_ACCOUNT_SIZE) * 3;
     s.env.airdrop(&s.schedule, donation).await;
     s.initialize().await.unwrap();
