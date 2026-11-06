@@ -43,8 +43,12 @@ creator, mint and id, and requires both the address and the stored bump to match
 | 256 | 8 | end_ts | i64, `start < end`, `end - start <= 315_360_000` (ten years) |
 | 264 | 8 | revoked_at | i64, 0 until a revocation |
 
-Invariants (checked on every load, not only at creation): exact length 272, discriminator, flags 0 or 1, reserved bytes
-zero, parameters accepted by `vesting_core::Schedule::new`, `claimed_amount + returned_amount <= total_amount`.
+Checked on every load (`load_schedule`, used by every instruction but `initialize_schedule`): owner = the vesting program, exact
+length 272, discriminator, flags 0 or 1, reserved bytes zero, and the canonical address and bump for the stored creator, mint and id.
+Checked by each handler that uses the numbers: that the stored parameters are accepted by `vesting_core::Schedule::new`
+(`state.schedule()`) and that `claimed_amount + returned_amount <= total_amount` (inside `claimable`, `after_claim` and
+`is_settled`). That is `claim`, `revoke` and `close`; `propose_beneficiary` and `accept_beneficiary` touch only the two keys and
+do not re-validate the amounts.
 The account holds exactly `Rent::minimum_balance(272)` lamports at creation (more if somebody donated first) and is never
 shrunk below rent exemption; only `close` removes lamports.
 
@@ -104,14 +108,15 @@ Pays `vested(now) - claimed` (zero before the cliff: `CliffNotReached`; nothing 
 | 0 | authority | S | equals the stored authority |
 | 1 | schedule | W | as above |
 | 2 | vault | W | as above |
-| 3 | beneficiary token account | W | stored mint, owner = stored beneficiary, not frozen |
+| 3 | beneficiary token account | W | only if the beneficiary is paid (vested and unclaimed > 0): stored mint, owner = stored beneficiary, not frozen. When nothing is owed to the beneficiary it is not read |
 | 4 | authority token account | W | stored mint, owner = stored authority, not frozen |
 | 5 | mint | | equals the stored mint |
 | 6 | token program | | the SPL Token program |
 
 Only if `revocable`, not yet revoked and not fully vested. Pays the beneficiary the vested part that is unclaimed and returns
-the unvested remainder to the authority, in one instruction. Accounts 3 and 4 may be the same account (one wallet can be
-both roles); neither may be the vault, the schedule, the mint or the signer.
+the unvested remainder to the authority, in one instruction; clears an open beneficiary proposal. Accounts 3 and 4 may be the
+same account (one wallet can be both roles); neither may be the vault, the schedule, the mint or the signer, and account 3 is
+always a writable account that differs from them even when it is not read.
 
 ### `close`
 
