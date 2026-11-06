@@ -34,7 +34,7 @@ jobs:
         run: sh scripts/rs.sh 'sh scripts/test-layers.sh'
       - name: Demo; it fails when cargo fails or when a row of the attack table is missing
         run: sh scripts/rs.sh 'sh scripts/demo.sh' > /dev/null
-      - name: Build the program (host build: the SBF toolchain is not part of this repository's tooling)
+      - name: "Build the program (host build; the SBF toolchain is not part of this repository's tooling)"
         run: sh scripts/rs.sh 'cargo build -p vesting_escrow --release --locked --offline && cargo build -p vesting_escrow --release --features no-entrypoint --locked --offline'
 
   coverage:
