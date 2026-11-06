@@ -305,6 +305,8 @@ fn revoke(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     state.revoked_at = now;
     state.claimed_amount = core.after_claim(state.claimed_amount, split.to_beneficiary).map_err(lift)?;
     state.returned_amount = split.to_authority;
+    // nothing is owed to a beneficiary after this: a proposal made before the revocation is dropped, not left open
+    state.pending_beneficiary = Pubkey::default();
     store_schedule(schedule, &state)?;
 
     let seeds = SignerSeeds::new(&state);

@@ -362,3 +362,21 @@ async fn the_token_programs_are_sbf_binaries_and_the_vesting_program_is_a_native
     assert!(ours.executable);
     assert_eq!(ours.owner, solana_sdk::native_loader::id(), "the vesting program is registered as a native builtin");
 }
+
+#[tokio::test]
+async fn a_revocation_clears_a_pending_beneficiary_change() {
+    let mut s = Scenario::new(linear()).await;
+    let successor = Keypair::new();
+    let (propose, old) = (s.propose_ix(&successor.pubkey()), s.beneficiary.insecure_clone());
+    s.env.send_ok(&[propose], &[&old]).await;
+    assert!(s.state().await.has_pending_beneficiary());
+    s.at(300).await;
+    s.revoke().await.unwrap();
+    let state = s.state().await;
+    assert!(!state.has_pending_beneficiary(), "a revoked schedule carries no open proposal");
+    assert_eq!(state.beneficiary, s.beneficiary.pubkey());
+    // the proposal cannot be accepted any more
+    let accept = s.accept_ix(&successor.pubkey());
+    let result = s.env.send(&[accept], &[&successor]).await;
+    assert_eq!(result, Err(vesting_tests::expect(0, vesting_client::VestingError::NoPendingBeneficiary)));
+}
