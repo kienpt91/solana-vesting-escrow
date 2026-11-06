@@ -225,7 +225,7 @@ runs it with a window of seven days).
 
 No other direct dependency: no `borsh`, no `thiserror`, no `bytemuck`, no `anchor-*`. The program's own normal-dependency
 tree is 151 crates (`solana-program` and what it pulls in); the test crate's tree is 517 crates because of
-`solana-program-test` (it embeds the whole runtime). Both numbers are from `cargo tree -e normal`.
+`solana-program-test` (it embeds the whole runtime). Both numbers are from `cargo tree -e normal`; the trees are recorded in `docs/dependency-tree.txt`.
 
 **Why the Solana 1.18 family.** See ADR 0006: newer program-test families need tools the pinned image lacks. The cost is an old
 ecosystem: the lock file contains `curve25519-dalek 3.2.1` and `ed25519-dalek 1.0.1`, which I know to carry published
@@ -277,7 +277,7 @@ crates/vesting_core/       pure logic, examples/curve.rs, tests/{schedule_exampl
 programs/vesting_escrow/   src/{lib,state,instruction,pda,processor,validation,token,error,codec,entrypoint}.rs, tests/layout.rs
 crates/vesting_client/     SDK, tests/builders.rs
 crates/vesting_tests/      src/{lib,attack}.rs harness, tests/{happy_paths,edge_cases,attacks,architecture}.rs, examples/walkthrough.rs
-docs/                      accounts.md, threat-model.md, audit-checklist.md, adapting.md, adr/, demo-output.txt
+docs/                      accounts.md, threat-model.md, audit-checklist.md, adapting.md, adr/, demo-output.txt, dependency-tree.txt
 scripts/                   rs.sh (container wrapper), test-layers.sh, demo.sh, coverage.sh, secret-scan.sh, hygiene.sh,
                            check-commit-msg.sh, check-crates-age.mjs, release scripts
 .github/                   workflows/{ci,release}.yml, dependabot.yml
